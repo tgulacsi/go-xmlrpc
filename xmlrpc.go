@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -13,10 +14,21 @@ import (
 	"time"
 )
 
-var structLevel int
+var unsupported = errors.New("unsupported type")
 
 type Array []interface{}
 type Struct map[string]interface{}
+type Fault struct {
+	Code    int
+	Message string
+}
+
+func (f Fault) String() string {
+	return fmt.Sprintf("%d: %s", f.Code, f.Message)
+}
+func (f Fault) Error() string {
+	return f.String()
+}
 
 var xmlSpecial = map[byte]string{
 	'<':  "&lt;",
@@ -44,165 +56,159 @@ type valueNode struct {
 	Body string `xml:",chardata"`
 }
 
-func next(p *xml.Decoder) (xml.Name, interface{}, error) {
-	se, e := nextStart(p)
-	if e != nil {
-		return xml.Name{}, nil, e
+func next(p *xml.Decoder, structLevel int) (nm xml.Name, structLeve int, nv interface{}, e error) {
+	var se xml.StartElement
+	if se, structLevel, e = nextStart(p, structLevel); e != nil {
+		return
 	}
 
-	var nv interface{}
+	var vn valueNode
 	switch se.Name.Local {
 	case "boolean":
 		if e = p.DecodeElement(&vn, &se); e != nil {
-			return xml.Name{}, nil, e
+			return
 		}
 		b, e := strconv.ParseBool(vn.Body)
-		return xml.Name{}, b, e
+		return xml.Name{}, structLevel, b, e
 	case "string":
-		var s string
-		if e = p.DecodeElement(&s, &se); e != nil {
-			return xml.Name{}, nil, e
+		if e = p.DecodeElement(&vn, &se); e != nil {
+			return
 		}
-		return xml.Name{}, s, nil
-	case "boolean":
-		var s string
-		if e = p.DecodeElement(&s, &se); e != nil {
-			return xml.Name{}, nil, e
-		}
-		s = strings.TrimSpace(s)
-		var b bool
-		switch s {
-		case "true":
-			b = true
-		case "false":
-			b = false
-		default:
-			e = errors.New("invalid boolean value")
-		}
-		return xml.Name{}, b, e
+		return xml.Name{}, structLevel, vn.Body, nil
 	case "int", "i1", "i2", "i4", "i8":
-		var s string
-		var i int
-		if e = p.DecodeElement(&s, &se); e != nil {
-			return xml.Name{}, nil, e
+		if e = p.DecodeElement(&vn, &se); e != nil {
+			return
 		}
-		i, e = strconv.Atoi(strings.TrimSpace(s))
-		return xml.Name{}, i, e
+		i, e := strconv.ParseInt(strings.TrimSpace(vn.Body), 10, 64)
+		return xml.Name{}, structLevel, i, e
 	case "double":
-		var s string
-		var f float64
-		if e = p.DecodeElement(&s, &se); e != nil {
-			return xml.Name{}, nil, e
+		if e = p.DecodeElement(&vn, &se); e != nil {
+			return
 		}
-		f, e = strconv.ParseFloat(strings.TrimSpace(s), 64)
-		return xml.Name{}, f, e
+		f, e := strconv.ParseFloat(strings.TrimSpace(vn.Body), 64)
+		return xml.Name{}, structLevel, f, e
 	case "dateTime.iso8601":
-		var s string
-		if e = p.DecodeElement(&s, &se); e != nil {
-			return xml.Name{}, nil, e
+		if e = p.DecodeElement(&vn, &se); e != nil {
+			return
 		}
-		t, e := time.Parse("20060102T15:04:05", s)
+		t, e := time.Parse("20060102T15:04:05", vn.Body)
 		if e != nil {
-			t, e = time.Parse("2006-01-02T15:04:05-07:00", s)
+			t, e = time.Parse("2006-01-02T15:04:05-07:00", vn.Body)
 			if e != nil {
-				t, e = time.Parse("2006-01-02T15:04:05", s)
+				t, e = time.Parse("2006-01-02T15:04:05", vn.Body)
 			}
 		}
-		return xml.Name{}, t, e
+		return xml.Name{}, structLevel, t, e
 	case "base64":
-		var s string
-		if e = p.DecodeElement(&s, &se); e != nil {
-			return xml.Name{}, nil, e
+		if e = p.DecodeElement(&vn, &se); e != nil {
+			return
 		}
-		if b, e := base64.StdEncoding.DecodeString(s); e != nil {
-			return xml.Name{}, nil, e
+		var b []byte
+		if b, e = base64.StdEncoding.DecodeString(vn.Body); e != nil {
+			return
 		} else {
-			return xml.Name{}, b, nil
+			return xml.Name{}, structLevel, b, nil
 		}
 	case "member":
-		nextStart(p)
-		return next(p)
+		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+			return
+		}
+		return next(p, structLevel)
 	case "value":
-		nextStart(p)
-		return next(p)
+		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+			return
+		}
+		return next(p, structLevel)
 	case "name":
-		nextStart(p)
-		return next(p)
+		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+			return
+		}
+		return next(p, structLevel)
 	case "struct":
 		structLevel++             // Entering new struct level. Increase global level.
 		localLevel := structLevel // And set local to current.
 
 		st := Struct{}
 
-		se, e = nextStart(p)
+		if se, structLevel, e = nextStart(p, structLevel); e != nil {
+			return
+		}
+		var value interface{}
+		var name string
 		for e == nil && se.Name.Local == "member" {
 			// name
-			se, e = nextStart(p)
+			if se, structLevel, e = nextStart(p, structLevel); e != nil {
+				return
+			}
 			if se.Name.Local != "name" {
-				return xml.Name{}, nil, errors.New("invalid response")
+				e = errors.New("invalid response")
+				return
 			}
-			if e != nil {
-				break
+			if e = p.DecodeElement(&vn, &se); e != nil {
+				return
 			}
-			var name string
-			if e = p.DecodeElement(&name, &se); e != nil {
-				return xml.Name{}, nil, e
-			}
-			se, e = nextStart(p)
-			if e != nil {
-				break
+			name = vn.Body
+			if se, structLevel, e = nextStart(p, structLevel); e != nil {
+				return
 			}
 
 			// value
-			_, value, e := next(p)
-			if se.Name.Local != "value" {
-				return xml.Name{}, nil, errors.New("invalid response")
+			if _, structLevel, value, e = next(p, structLevel); e != nil {
+				return
 			}
-			if e != nil {
-				break
+			if se.Name.Local != "value" {
+				e = errors.New("invalid response")
+				return
 			}
 			st[name] = value
 
 			if localLevel > structLevel { // We came up from higher level. We're already on a Start.
 				break
 			}
-			se, e = nextStart(p)
-			if e != nil {
-				break
+			if se, structLevel, e = nextStart(p, structLevel); e != nil {
+				return
 			}
 		}
-		return xml.Name{}, st, nil
+		return xml.Name{}, structLevel, st, nil
 	case "array":
 		var ar Array
-		nextStart(p) // data
+		// data
+		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+			return
+		}
+		// top of value
+		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+			return
+		}
+		var value interface{}
 		for {
-			nextStart(p) // top of value
-			_, value, e := next(p)
-			if e != nil {
+			if _, structLevel, value, e = next(p, structLevel); e != nil {
 				break
 			}
 			ar = append(ar, value)
 		}
-		return xml.Name{}, ar, nil
+		return xml.Name{}, structLevel, ar, nil
 	}
 
 	if e = p.DecodeElement(nv, &se); e != nil {
-		return xml.Name{}, nil, e
+		return
 	}
-	return se.Name, nv, e
+	return se.Name, structLevel, nv, e
 }
-func nextStart(p *xml.Decoder) (xml.StartElement, error) {
+
+// jumps to the next start element, returns it
+func nextStart(p *xml.Decoder, sl int) (xml.StartElement, int, error) {
 	for {
 		t, e := p.Token()
 		if e != nil {
-			return xml.StartElement{}, e
+			return xml.StartElement{}, sl, e
 		}
 		switch t := t.(type) {
 		case xml.StartElement:
-			return t, nil
+			return t, sl, nil
 		case xml.EndElement:
 			if t.Name.Local == "struct" { // Found struct end. Decrease struct level.
-				structLevel--
+				sl--
 			}
 		}
 	}
@@ -286,7 +292,7 @@ func to_xml(v interface{}, typ bool) (s string) {
 	return
 }
 
-func Call(url, name string, args ...interface{}) (v interface{}, e error) {
+func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	s := "<methodCall>"
 	s += "<methodName>" + xmlEscape(name) + "</methodName>"
 	s += "<params>"
@@ -299,27 +305,231 @@ func Call(url, name string, args ...interface{}) (v interface{}, e error) {
 	bs := bytes.NewBuffer([]byte(s))
 	r, e := http.Post(url, "text/xml", bs)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	defer r.Body.Close()
 
-	p := xml.NewDecoder(r.Body)
-	se, e := nextStart(p) // methodResponse
+	return Decode(r.Body)
+}
+
+func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
+	r := reflect.ValueOf(v)
+	t := r.Type()
+	k := t.Kind()
+
+	if b, ok := v.([]byte); ok {
+		dst := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
+		base64.StdEncoding.Encode(dst, b)
+		_, err = w.Write(b)
+		return
+	}
+
+	switch k {
+	case reflect.Invalid:
+		return unsupported
+	case reflect.Bool:
+		_, err = fmt.Fprintf(w, "<boolean>%v</boolean>", v)
+		return err
+	case reflect.Int,
+		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint,
+		reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if typ {
+			_, err = fmt.Fprintf(w, "<int>%v</int>", v)
+			return err
+		}
+		_, err = fmt.Fprintf(w, "%v", v)
+		return err
+	case reflect.Uintptr:
+		return unsupported
+	case reflect.Float32, reflect.Float64:
+		if typ {
+			_, err = fmt.Fprintf(w, "<double>%v</double>", v)
+			return err
+		}
+		_, err = fmt.Fprintf(w, "%v", v)
+		return err
+	case reflect.Complex64, reflect.Complex128:
+		return unsupported
+	case reflect.Array, reflect.Slice:
+		if _, err = io.WriteString(w, "<array><data>"); err != nil {
+			return
+		}
+		n := r.Len()
+		for i := 0; i < n; i++ {
+			if _, err = io.WriteString(w, "<value>"); err != nil {
+				return
+			}
+			if err = WriteXml(w, r.Index(i).Interface(), typ); err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, "</value>"); err != nil {
+				return
+			}
+		}
+		if _, err = io.WriteString(w, "</data></array>"); err != nil {
+			return
+		}
+	case reflect.Chan:
+		return unsupported
+	case reflect.Func:
+		return unsupported
+	case reflect.Interface:
+		return WriteXml(w, r.Elem(), typ)
+	case reflect.Map:
+		if _, err = io.WriteString(w, "<struct>"); err != nil {
+			return
+		}
+		for _, key := range r.MapKeys() {
+			if _, err = io.WriteString(w, "<member><name>"); err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, xmlEscape(key.Interface().(string))); err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, "</name><value>"); err != nil {
+				return
+			}
+			if err = WriteXml(w, r.MapIndex(key).Interface(), typ); err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, "</value></member>"); err != nil {
+				return
+			}
+		}
+		_, err = io.WriteString(w, "</struct")
+		return
+	case reflect.Ptr:
+		return unsupported
+	case reflect.String:
+		if typ {
+			_, err = fmt.Fprintf(w, "<string>%v</string>", xmlEscape(v.(string)))
+			return
+		}
+		_, err = io.WriteString(w, xmlEscape(v.(string)))
+		return
+	case reflect.Struct:
+		if _, err = io.WriteString(w, "<struct>"); err != nil {
+			return
+		}
+		n := r.NumField()
+		for i := 0; i < n; i++ {
+			if _, err = io.WriteString(w, "<member><name>"); err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, xmlEscape(t.Field(i).Name)); err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, "</name><value>"); err != nil {
+				return
+			}
+			if err = WriteXml(w, r.FieldByIndex([]int{i}).Interface(), true); err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, "</value></member>"); err != nil {
+				return err
+			}
+		}
+		_, err = io.WriteString(w, "</struct>")
+		return
+	case reflect.UnsafePointer:
+		return WriteXml(w, r.Elem(), typ)
+	}
+	return
+}
+
+func taggedWrite(w io.Writer, tag, inner string) (n int, err error) {
+	if n, err = io.WriteString(w, "<"+tag+">"); err != nil {
+		return
+	}
+	var j int
+	j, err = io.WriteString(w, inner)
+	n += j
+	if err != nil {
+		return
+	}
+	j, err = io.WriteString(w, "</"+tag+">")
+	n += j
+	return
+}
+
+func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
+	if name == "" {
+		if _, err = io.WriteString(w, "<methodResponse>"); err != nil {
+			return
+		}
+	} else {
+		if _, err = io.WriteString(w, "<methodCall><methodName>"); err != nil {
+			return
+		}
+		if _, err = io.WriteString(w, xmlEscape(name)); err != nil {
+			return
+		}
+		if _, err = io.WriteString(w, "</methodName>"); err != nil {
+			return
+		}
+	}
+	if _, err = io.WriteString(w, "<params"); err != nil {
+		return
+	}
+	for _, arg := range args {
+		if _, err = io.WriteString(w, "<param><value>"); err != nil {
+			return
+		}
+		if err = WriteXml(w, arg, true); err != nil {
+			return
+		}
+		if _, err = io.WriteString(w, "</value></param>"); err != nil {
+			return
+		}
+	}
+	_, err = io.WriteString(w, "</params></methodCall>")
+	return err
+}
+
+func Decode(r io.Reader) (params []interface{}, fault *Fault, e error) {
+	p := xml.NewDecoder(r)
+	structLevel := 0
+	se, structLevel, e := nextStart(p, structLevel) // methodResponse
 	if se.Name.Local != "methodResponse" {
-		return nil, errors.New("invalid response")
+		return nil, nil, errors.New("invalid response")
 	}
-	se, e = nextStart(p) // params
+	se, structLevel, e = nextStart(p, structLevel) // params
 	if se.Name.Local != "params" {
-		return nil, errors.New("invalid response")
+		return nil, nil, errors.New("invalid response")
 	}
-	se, e = nextStart(p) // param
-	if se.Name.Local != "param" {
-		return nil, errors.New("invalid response")
+	var v interface{}
+	for {
+		// param
+		if se, structLevel, e = nextStart(p, structLevel); e != nil {
+			if e == io.EOF {
+				e = nil
+				break
+			}
+			return
+		}
+		if se.Name.Local != "param" {
+			return nil, nil, errors.New("invalid response")
+		}
+		// value
+		if se, structLevel, e = nextStart(p, structLevel); e != nil {
+			if e == io.EOF {
+				e = nil
+				break
+			}
+			return
+		}
+		if se.Name.Local != "value" {
+			return nil, nil, errors.New("invalid response")
+		}
+		if _, structLevel, v, e = next(p, structLevel); e != nil {
+			if e == io.EOF {
+				e = nil
+				break
+			}
+			return
+		}
+		params = append(params, v)
 	}
-	se, e = nextStart(p) // value
-	if se.Name.Local != "value" {
-		return nil, errors.New("invalid response")
-	}
-	_, v, e = next(p)
-	return v, e
+	return
 }
