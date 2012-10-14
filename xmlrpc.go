@@ -15,7 +15,6 @@ import (
 )
 
 var Unsupported = errors.New("Unsupported type")
-var InvalidResponse = errors.New("invalid response")
 
 type Array []interface{}
 type Struct map[string]interface{}
@@ -142,7 +141,7 @@ func next(p *xml.Decoder, structLevel int) (nm xml.Name, structLeve int, nv inte
 				return
 			}
 			if se.Name.Local != "name" {
-				e = InvalidResponse
+				e = fmt.Errorf("invalid response: start element is '%s', not 'name'", se.Name.Local)
 				return
 			}
 			if e = p.DecodeElement(&vn, &se); e != nil {
@@ -158,7 +157,7 @@ func next(p *xml.Decoder, structLevel int) (nm xml.Name, structLeve int, nv inte
 				return
 			}
 			if se.Name.Local != "value" {
-				e = InvalidResponse
+				e = fmt.Errorf("invalid response: found '%s', required 'value'", se.Name.Local)
 				return
 			}
 			st[name] = value
@@ -320,9 +319,10 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	k := t.Kind()
 
 	if b, ok := v.([]byte); ok {
-		dst := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
+		length := base64.StdEncoding.EncodedLen(len(b))
+		dst := make([]byte, length)
 		base64.StdEncoding.Encode(dst, b)
-		_, err = w.Write(b)
+		_, err = w.Write(dst)
 		return
 	}
 
@@ -354,22 +354,22 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	case reflect.Complex64, reflect.Complex128:
 		return Unsupported
 	case reflect.Array, reflect.Slice:
-		if _, err = io.WriteString(w, "<array><data>"); err != nil {
+		if _, err = io.WriteString(w, "<array><data>\n"); err != nil {
 			return
 		}
 		n := r.Len()
 		for i := 0; i < n; i++ {
-			if _, err = io.WriteString(w, "<value>"); err != nil {
+			if _, err = io.WriteString(w, "  <value>"); err != nil {
 				return
 			}
 			if err = WriteXml(w, r.Index(i).Interface(), typ); err != nil {
 				return
 			}
-			if _, err = io.WriteString(w, "</value>"); err != nil {
+			if _, err = io.WriteString(w, "</value>\n"); err != nil {
 				return
 			}
 		}
-		if _, err = io.WriteString(w, "</data></array>"); err != nil {
+		if _, err = io.WriteString(w, "</data></array>\n"); err != nil {
 			return
 		}
 	case reflect.Chan:
@@ -379,11 +379,11 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	case reflect.Interface:
 		return WriteXml(w, r.Elem(), typ)
 	case reflect.Map:
-		if _, err = io.WriteString(w, "<struct>"); err != nil {
+		if _, err = io.WriteString(w, "<struct>\n"); err != nil {
 			return
 		}
 		for _, key := range r.MapKeys() {
-			if _, err = io.WriteString(w, "<member><name>"); err != nil {
+			if _, err = io.WriteString(w, "  <member><name>"); err != nil {
 				return
 			}
 			if _, err = io.WriteString(w, xmlEscape(key.Interface().(string))); err != nil {
@@ -395,7 +395,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			if err = WriteXml(w, r.MapIndex(key).Interface(), typ); err != nil {
 				return
 			}
-			if _, err = io.WriteString(w, "</value></member>"); err != nil {
+			if _, err = io.WriteString(w, "</value></member>\n"); err != nil {
 				return
 			}
 		}
@@ -471,25 +471,29 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 		if _, err = io.WriteString(w, xmlEscape(name)); err != nil {
 			return
 		}
-		if _, err = io.WriteString(w, "</methodName>"); err != nil {
+		if _, err = io.WriteString(w, "</methodName>\n"); err != nil {
 			return
 		}
 	}
-	if _, err = io.WriteString(w, "<params"); err != nil {
+	if _, err = io.WriteString(w, "<params>\n"); err != nil {
 		return
 	}
 	for _, arg := range args {
-		if _, err = io.WriteString(w, "<param><value>"); err != nil {
+		if _, err = io.WriteString(w, "  <param><value>"); err != nil {
 			return
 		}
 		if err = WriteXml(w, arg, true); err != nil {
 			return
 		}
-		if _, err = io.WriteString(w, "</value></param>"); err != nil {
+		if _, err = io.WriteString(w, "</value></param>\n"); err != nil {
 			return
 		}
 	}
-	_, err = io.WriteString(w, "</params></methodCall>")
+	if name == "" {
+		_, err = io.WriteString(w, "</params></methodResponse>")
+	} else {
+		_, err = io.WriteString(w, "</params></methodCall>")
+	}
 	return err
 }
 
@@ -498,6 +502,11 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	structLevel := 0
 	se, structLevel, e := nextStart(p, structLevel) // methodResponse or methodCall
 	if se.Name.Local != "methodResponse" {
+		se, structLevel, e = nextStart(p, structLevel) // methodName
+		if se.Name.Local != "methodName" {
+			e = fmt.Errorf("invalid call: requred 'methodName', found '%s'", se.Name.Local)
+			return
+		}
 		t, err := p.Token()
 		if err != nil {
 			e = err
@@ -505,14 +514,14 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 		}
 		d, ok := t.(xml.CharData)
 		if !ok {
-			e = InvalidResponse
+			e = fmt.Errorf("invalid call: required call name, found '%v'", t)
 			return
 		}
 		name = string(d.Copy())
 	}
 	se, structLevel, e = nextStart(p, structLevel) // params
 	if se.Name.Local != "params" {
-		e = InvalidResponse
+		e = fmt.Errorf("invalid response: required 'params', found '%s'", se.Name.Local)
 		return
 	}
 	params = make([]interface{}, 0, 8)
@@ -527,7 +536,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 			return
 		}
 		if se.Name.Local != "param" {
-			e = InvalidResponse
+			e = fmt.Errorf("invalid response: required 'param', found '%s'", se.Name.Local)
 			return
 		}
 		// value
@@ -539,7 +548,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 			return
 		}
 		if se.Name.Local != "value" {
-			e = InvalidResponse
+			e = fmt.Errorf("invalid response: required 'value', found '%s'", se.Name.Local)
 			return
 		}
 		if _, structLevel, v, e = next(p, structLevel); e != nil {

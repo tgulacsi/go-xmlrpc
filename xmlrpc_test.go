@@ -3,6 +3,7 @@ package xmlrpc
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -55,20 +56,39 @@ const XmlFault = `<?xml version="1.0"?>
 
 var XmlCallStruct = []interface{}{int(41), int(42), true,
 	"árvíztűrő tükörfúrógép", -0.333333, time.Now(),
-	[]byte{1, 2, 3, 5, 7, 11, 13, 17, 19},
+	[]byte{1, 2, 3, 5, 7, 11, 13, 17},
+	[]interface{}{"a", "b"},
+	map[string]string{"k": "v"},
 }
 
 func TestResponse(t *testing.T) {
-	name, c, fault, err := Unmarshal(bytes.NewBufferString(XmlResponse))
+	name, c, fault, err := Unmarshal(bytes.NewBufferString(XmlCallString))
+	if err != nil {
+		t.Fatal("error unmarshaling XmlCall:", err)
+	}
+	fmt.Printf("unmarshalled call[%s]: %=v\n", name, c)
+
+	name, c, fault, err = Unmarshal(bytes.NewBufferString(XmlResponse))
 	if err != nil {
 		t.Fatal("error unmarshaling XmlResponse:", err)
 	}
-	fmt.Printf("unmarshalled response[%s]: %=v\n%s", name, c, fault)
+	fmt.Printf("unmarshalled response[%s]: %=v\n%s\n", name, c, fault)
 
 	buf := bytes.NewBuffer(nil)
-	err = Marshal(buf, "trial", XmlCallStruct)
+	err = Marshal(buf, "trial", XmlCallStruct...)
 	if err != nil {
 		t.Fatal("error marshalling XmlCallStruct:", err)
 	}
-	fmt.Printf("marshalled %=v\n%s", XmlCallStruct, buf.Bytes())
+	fmt.Printf("marshalled %=v\n%s\n", XmlCallStruct, buf.Bytes())
+
+	name, c, fault, err = Unmarshal(buf)
+	if err != nil {
+		t.Fatal("cannot unmarshal previously marshalled struct:", err)
+	}
+	if name != "trial" {
+		t.Error("name mismatch")
+	}
+	if !reflect.DeepEqual(c, XmlCallStruct) {
+		t.Errorf("struct mistmatch:\n%=v\n!=\n%=v\n", c, XmlCallStruct)
+	}
 }
