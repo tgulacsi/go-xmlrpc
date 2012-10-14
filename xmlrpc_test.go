@@ -31,6 +31,7 @@ const XmlResponse = `<?xml version="1.0"?>
       <param><value><string>árvízűtő tükörfúrógép</string></value></param>
       <param><value><double>-0.333333</double></value></param>
       <param><value><base64>eW91IGNhbid0IHJlYWQgdGhpcyE=</base64></value></param>
+      <param><value><string>!last param!</string></value></param>
       </params>
    </methodResponse>`
 
@@ -53,13 +54,21 @@ const XmlFault = `<?xml version="1.0"?>
    </methodResponse>`
 
 var XmlCallStruct = []interface{}{int(41), int(42), true,
-	"árvíztűrő tükörfúrógép", -0.333333, time.Now(), []byte("proba"),
+	"árvíztűrő tükörfúrógép", -0.333333, time.Now(),
+	[]byte{1, 2, 3, 5, 7, 11, 13, 17, 19},
 }
 
 func TestResponse(t *testing.T) {
-	c, fault, err := Decode(bytes.NewBufferString(XmlResponse))
+	name, c, fault, err := Unmarshal(bytes.NewBufferString(XmlResponse))
 	if err != nil {
-		t.Fatal("error unmarshaling XmlCallString:", err)
+		t.Fatal("error unmarshaling XmlResponse:", err)
 	}
-	fmt.Printf("unmarshalled response: %+v\n%s", c, fault)
+	fmt.Printf("unmarshalled response[%s]: %=v\n%s", name, c, fault)
+
+	buf := bytes.NewBuffer(nil)
+	err = Marshal(buf, "trial", XmlCallStruct)
+	if err != nil {
+		t.Fatal("error marshalling XmlCallStruct:", err)
+	}
+	fmt.Printf("marshalled %=v\n%s", XmlCallStruct, buf.Bytes())
 }

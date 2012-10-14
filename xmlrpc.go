@@ -14,7 +14,8 @@ import (
 	"time"
 )
 
-var unsupported = errors.New("unsupported type")
+var Unsupported = errors.New("Unsupported type")
+var InvalidResponse = errors.New("invalid response")
 
 type Array []interface{}
 type Struct map[string]interface{}
@@ -141,7 +142,7 @@ func next(p *xml.Decoder, structLevel int) (nm xml.Name, structLeve int, nv inte
 				return
 			}
 			if se.Name.Local != "name" {
-				e = errors.New("invalid response")
+				e = InvalidResponse
 				return
 			}
 			if e = p.DecodeElement(&vn, &se); e != nil {
@@ -157,7 +158,7 @@ func next(p *xml.Decoder, structLevel int) (nm xml.Name, structLeve int, nv inte
 				return
 			}
 			if se.Name.Local != "value" {
-				e = errors.New("invalid response")
+				e = InvalidResponse
 				return
 			}
 			st[name] = value
@@ -226,7 +227,7 @@ func to_xml(v interface{}, typ bool) (s string) {
 
 	switch k {
 	case reflect.Invalid:
-		panic("unsupported type")
+		panic("Unsupported type")
 	case reflect.Bool:
 		return fmt.Sprintf("<boolean>%v</boolean>", v)
 	case reflect.Int,
@@ -238,14 +239,14 @@ func to_xml(v interface{}, typ bool) (s string) {
 		}
 		return fmt.Sprintf("%v", v)
 	case reflect.Uintptr:
-		panic("unsupported type")
+		panic("Unsupported type")
 	case reflect.Float32, reflect.Float64:
 		if typ {
 			return fmt.Sprintf("<double>%v</double>", v)
 		}
 		return fmt.Sprintf("%v", v)
 	case reflect.Complex64, reflect.Complex128:
-		panic("unsupported type")
+		panic("Unsupported type")
 	case reflect.Array, reflect.Slice:
 		s = "<array><data>"
 		for n := 0; n < r.Len(); n++ {
@@ -256,9 +257,9 @@ func to_xml(v interface{}, typ bool) (s string) {
 		s += "</data></array>"
 		return s
 	case reflect.Chan:
-		panic("unsupported type")
+		panic("Unsupported type")
 	case reflect.Func:
-		panic("unsupported type")
+		panic("Unsupported type")
 	case reflect.Interface:
 		return to_xml(r.Elem(), typ)
 	case reflect.Map:
@@ -271,7 +272,7 @@ func to_xml(v interface{}, typ bool) (s string) {
 		}
 		return s + "</struct>"
 	case reflect.Ptr:
-		panic("unsupported type")
+		panic("Unsupported type")
 	case reflect.String:
 		if typ {
 			return fmt.Sprintf("<string>%v</string>", xmlEscape(v.(string)))
@@ -309,7 +310,8 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	}
 	defer r.Body.Close()
 
-	return Decode(r.Body)
+	_, v, f, e := Unmarshal(r.Body)
+	return v, f, e
 }
 
 func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
@@ -326,7 +328,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 
 	switch k {
 	case reflect.Invalid:
-		return unsupported
+		return Unsupported
 	case reflect.Bool:
 		_, err = fmt.Fprintf(w, "<boolean>%v</boolean>", v)
 		return err
@@ -341,7 +343,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = fmt.Fprintf(w, "%v", v)
 		return err
 	case reflect.Uintptr:
-		return unsupported
+		return Unsupported
 	case reflect.Float32, reflect.Float64:
 		if typ {
 			_, err = fmt.Fprintf(w, "<double>%v</double>", v)
@@ -350,7 +352,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = fmt.Fprintf(w, "%v", v)
 		return err
 	case reflect.Complex64, reflect.Complex128:
-		return unsupported
+		return Unsupported
 	case reflect.Array, reflect.Slice:
 		if _, err = io.WriteString(w, "<array><data>"); err != nil {
 			return
@@ -371,9 +373,9 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			return
 		}
 	case reflect.Chan:
-		return unsupported
+		return Unsupported
 	case reflect.Func:
-		return unsupported
+		return Unsupported
 	case reflect.Interface:
 		return WriteXml(w, r.Elem(), typ)
 	case reflect.Map:
@@ -400,7 +402,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = io.WriteString(w, "</struct")
 		return
 	case reflect.Ptr:
-		return unsupported
+		return Unsupported
 	case reflect.String:
 		if typ {
 			_, err = fmt.Fprintf(w, "<string>%v</string>", xmlEscape(v.(string)))
@@ -414,6 +416,10 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		}
 		n := r.NumField()
 		for i := 0; i < n; i++ {
+			c := t.Field(i).Name[:1]
+			if strings.ToLower(c) == c { //have to skip unexported fields
+				continue
+			}
 			if _, err = io.WriteString(w, "<member><name>"); err != nil {
 				return
 			}
@@ -423,7 +429,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			if _, err = io.WriteString(w, "</name><value>"); err != nil {
 				return
 			}
-			if err = WriteXml(w, r.FieldByIndex([]int{i}).Interface(), true); err != nil {
+			if err = WriteXml(w, r.Field(i).Interface(), true); err != nil {
 				return
 			}
 			if _, err = io.WriteString(w, "</value></member>"); err != nil {
@@ -487,17 +493,29 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 	return err
 }
 
-func Decode(r io.Reader) (params []interface{}, fault *Fault, e error) {
+func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e error) {
 	p := xml.NewDecoder(r)
 	structLevel := 0
-	se, structLevel, e := nextStart(p, structLevel) // methodResponse
+	se, structLevel, e := nextStart(p, structLevel) // methodResponse or methodCall
 	if se.Name.Local != "methodResponse" {
-		return nil, nil, errors.New("invalid response")
+		t, err := p.Token()
+		if err != nil {
+			e = err
+			return
+		}
+		d, ok := t.(xml.CharData)
+		if !ok {
+			e = InvalidResponse
+			return
+		}
+		name = string(d.Copy())
 	}
 	se, structLevel, e = nextStart(p, structLevel) // params
 	if se.Name.Local != "params" {
-		return nil, nil, errors.New("invalid response")
+		e = InvalidResponse
+		return
 	}
+	params = make([]interface{}, 0, 8)
 	var v interface{}
 	for {
 		// param
@@ -509,7 +527,8 @@ func Decode(r io.Reader) (params []interface{}, fault *Fault, e error) {
 			return
 		}
 		if se.Name.Local != "param" {
-			return nil, nil, errors.New("invalid response")
+			e = InvalidResponse
+			return
 		}
 		// value
 		if se, structLevel, e = nextStart(p, structLevel); e != nil {
@@ -520,11 +539,15 @@ func Decode(r io.Reader) (params []interface{}, fault *Fault, e error) {
 			return
 		}
 		if se.Name.Local != "value" {
-			return nil, nil, errors.New("invalid response")
+			e = InvalidResponse
+			return
 		}
 		if _, structLevel, v, e = next(p, structLevel); e != nil {
 			if e == io.EOF {
 				e = nil
+				if v != nil {
+					params = append(params, v)
+				}
 				break
 			}
 			return
