@@ -7,12 +7,29 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var logger = log.New(os.Stderr, "xmlrpc", log.LstdFlags)
+
+const (
+	FullXmlRpcTime  = "2006-01-02T15:04:05-07:00"
+	LocalXmlRpcTime = "2006-01-02T15:04:05"
+	DenseXmlRpcTime = "20060102T15:04:05"
+)
+
+// sets new logger for this package, returns old logger
+func SetLogger(lgr *log.Logger) *log.Logger {
+	old := logger
+	logger = lgr
+	return old
+}
 
 var Unsupported = errors.New("Unsupported type")
 
@@ -91,11 +108,11 @@ func next(p *xml.Decoder, structLevel int) (nm xml.Name, structLeve int, nv inte
 		if e = p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
-		t, e := time.Parse("20060102T15:04:05", vn.Body)
+		t, e := time.Parse(DenseXmlRpcTime, vn.Body)
 		if e != nil {
-			t, e = time.Parse("2006-01-02T15:04:05-07:00", vn.Body)
+			t, e = time.Parse(FullXmlRpcTime, vn.Body)
 			if e != nil {
-				t, e = time.Parse("2006-01-02T15:04:05", vn.Body)
+				t, e = time.Parse(LocalXmlRpcTime, vn.Body)
 			}
 		}
 		return xml.Name{}, structLevel, t, e
@@ -215,6 +232,7 @@ func nextStart(p *xml.Decoder, sl int) (xml.StartElement, int, error) {
 	panic("unreachable")
 }
 
+<<<<<<< HEAD
 func to_xml(v interface{}, typ bool) (s string) {
 	r := reflect.ValueOf(v)
 	t := r.Type()
@@ -296,10 +314,13 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	s := "<methodCall>"
 	s += "<methodName>" + xmlEscape(name) + "</methodName>"
 	s += "<params>"
+	buf := bytes.NewBuffer(nil)
 	for _, arg := range args {
 		s += "<param><value>"
-		s += to_xml(arg, true) // Warning changed typed arguments to TRUE !
+		WriteXml(buf, arg, true)
+		s += buf.String() // Warning changed typed arguments to TRUE !
 		s += "</value></param>"
+		buf.Reset()
 	}
 	s += "</params></methodCall>"
 	bs := bytes.NewBuffer([]byte(s))
@@ -314,6 +335,7 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 }
 
 func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
+	logger.SetPrefix("WriteXml")
 	r := reflect.ValueOf(v)
 	t := r.Type()
 	k := t.Kind()
@@ -323,6 +345,10 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		dst := make([]byte, length)
 		base64.StdEncoding.Encode(dst, b)
 		_, err = w.Write(dst)
+		return
+	}
+	if tim, ok := v.(time.Time); ok {
+		_, err = taggedWrite(w, "dateTime.iso8601", tim.Format(FullXmlRpcTime))
 		return
 	}
 
