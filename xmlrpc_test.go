@@ -29,7 +29,7 @@ const XmlResponse = `<?xml version="1.0"?>
       <param><value><i4>41</i4></value></param>
       <param><value><int>42</int></value></param>
       <param><value><boolean>1</boolean></value></param>
-      <param><value><string>árvízűtő tükörfúrógép</string></value></param>
+      <param><value><string>árvízűrő tükörfúrógép</string></value></param>
       <param><value><double>-0.333333</double></value></param>
       <param><value><base64>eW91IGNhbid0IHJlYWQgdGhpcyE=</base64></value></param>
       <param><value><string>!last param!</string></value></param>

@@ -32,6 +32,7 @@ func SetLogger(lgr *log.Logger) *log.Logger {
 }
 
 var Unsupported = errors.New("Unsupported type")
+var levelDecremented = errors.New("level decremented")
 
 // type Array []interface{}
 // type Struct map[string]interface{}
@@ -77,10 +78,11 @@ type state struct {
 	p         *xml.Decoder
 	level     int
 	remainder *interface{}
+	last      xml.StartElement
 }
 
 func newParser(p *xml.Decoder) *state {
-	return &state{p, 0, nil}
+	return &state{p, 0, nil, xml.StartElement{}}
 }
 
 func (st *state) next() (nm xml.Name, nv interface{}, e error) {
@@ -93,10 +95,19 @@ func (st *state) next() (nm xml.Name, nv interface{}, e error) {
 		panic("st.level < 0")
 	}
 	var se xml.StartElement
-	if se, e = st.nextStart(); e != nil {
-		return
+	for {
+		se, e = st.nextStart()
+		if e == nil {
+			if se.Name.Local == "param" {
+				e = levelDecremented
+				return
+			}
+			break
+		} else if e != nil && e != levelDecremented {
+			return
+		}
 	}
-	// log.Print("next level:", st.level, " meets <", se.Name.Local, ">")
+	log.Print("next level:", st.level, " meets <", se.Name.Local, ">")
 
 	var vn valueNode
 	switch se.Name.Local {
@@ -159,12 +170,13 @@ func (st *state) next() (nm xml.Name, nv interface{}, e error) {
 		}
 		return st.next()
 	case "struct":
-		st.level++             // Entering new struct level. Increase global level.
-		localLevel := st.level // And set local to current.
+		st.level++ // Entering new struct level. Increase global level.
+		// localLevel := st.level // And set local to current.
 
 		strct := make(map[string]interface{}, 8)
 
 		if se, e = st.nextStart(); e != nil {
+			log.Println("struct first step error:", e)
 			return
 		}
 		var value interface{}
@@ -196,23 +208,22 @@ func (st *state) next() (nm xml.Name, nv interface{}, e error) {
 				return
 			}
 
-			// log.Print("struct sl=", st.level, " ll=", localLevel)
-			if localLevel > st.level { // We came up from higher level. We're already on a Start.
-				// st.remainder = &value
-				break
-			}
 			strct[name] = value
 			se, e = st.nextStart()
 			// log.Print("last se=", se.Name.Local)
 		}
-		// log.Print("struct returns with sl=", st.level, " st=", st)
-		return xml.Name{}, strct, nil
+		// log.Print("struct returns with sl=", st.level, " strct=", strct, " e=", e)
+		if e == levelDecremented {
+			e = nil
+		}
+		return xml.Name{}, strct, e
 	case "array":
-		st.level++             // Entering new struct level. Increase global level.
-		localLevel := st.level // And set local to current.
+		st.level++ // Entering new struct level. Increase global level.
+		// localLevel := st.level // And set local to current.
 
 		// data
 		if se, e = st.nextStart(); e != nil {
+			log.Println("array first step returns with ", e)
 			return
 		}
 		if se.Name.Local != "data" {
@@ -224,22 +235,23 @@ func (st *state) next() (nm xml.Name, nv interface{}, e error) {
 		for {
 			_, value, e = st.next()
 			// log.Print("array se=", se.Name.Local, " sl=", st.level,
-			// 	" ll=", localLevel, " val=", value, " e=", e)
+			// 	" val=", value, " e=", e)
 			if e != nil {
 				if e == io.EOF {
+					if value != nil {
+						ar = append(ar, value)
+					}
 					break
 				}
 				return
 			}
-			// log.Print("array sl=", st.level, " ll=", localLevel)
-			if localLevel > st.level { // We came up from higher level. We're already on a Start.
-				st.remainder = &value
-				break
-			}
 			ar = append(ar, value)
 		}
+		if e == levelDecremented {
+			e = nil
+		}
 		// log.Print("array returns ", ar)
-		return xml.Name{}, ar, nil
+		return xml.Name{}, ar, e
 	}
 
 	if e = st.p.DecodeElement(nv, &se); e != nil {
@@ -263,14 +275,16 @@ func (st *state) nextStart() (xml.StartElement, error) {
 		}
 		switch t := t.(type) {
 		case xml.StartElement:
+			st.last = t
 			return t, nil
 		case xml.EndElement:
 			// log.Print("nextStart jumps </", t.Name.Local, ">", " level=", st.level)
 			if t.Name.Local == "struct" || t.Name.Local == "array" { // Found struct end. Decrease struct level.
 				st.level--
-				if st.level < 0 {
-					panic("st.level < 0")
-				}
+				return xml.StartElement{}, levelDecremented
+				// if st.level < 0 {
+				// 	panic("st.level < 0")
+				// }
 			}
 		}
 	}
@@ -372,10 +386,6 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 
 func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	logger.SetPrefix("WriteXml")
-	r := reflect.ValueOf(v)
-	t := r.Type()
-	k := t.Kind()
-
 	if b, ok := v.([]byte); ok {
 		length := base64.StdEncoding.EncodedLen(len(b))
 		dst := make([]byte, length)
@@ -387,6 +397,9 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = taggedWriteString(w, "dateTime.iso8601", tim.Format(FullXmlRpcTime))
 		return
 	}
+	r := reflect.ValueOf(v)
+	t := r.Type()
+	k := t.Kind()
 
 	switch k {
 	case reflect.Invalid:
@@ -600,40 +613,39 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	}
 	params = make([]interface{}, 0, 8)
 	var v interface{}
+	// param
+	if se, e = st.nextStart(); e != nil {
+		if e == io.EOF {
+			e = nil
+		}
+		return
+	}
+	if se.Name.Local != "param" {
+		e = fmt.Errorf("invalid response: required 'param', found '%s'", se.Name.Local)
+		return
+	}
 	for {
-		// param
-		if se, e = st.nextStart(); e != nil {
-			if e == io.EOF {
-				e = nil
-				break
+		if st.last.Name.Local != "param" {
+			if se, e = st.nextStart(); e != nil {
+				if e == io.EOF {
+					e = nil
+				}
+				return
 			}
-			return
-		}
-		if se.Name.Local != "param" {
-			e = fmt.Errorf("invalid response: required 'param', found '%s'", se.Name.Local)
-			return
-		}
-		// value
-		if se, e = st.nextStart(); e != nil {
-			if e == io.EOF {
-				e = nil
-				break
-			}
-			return
-		}
-		if se.Name.Local != "value" {
-			e = fmt.Errorf("invalid response: required 'value', found '%s'", se.Name.Local)
-			return
+
 		}
 		if _, v, e = st.next(); e != nil {
-			if e == io.EOF {
-				e = nil
-				if v != nil {
-					params = append(params, v)
+			log.Println("nxt=", e, " v=", v)
+			if e != levelDecremented {
+				if e == io.EOF {
+					e = nil
+					if v != nil {
+						params = append(params, v)
+					}
+					break
 				}
-				break
+				return
 			}
-			return
 		}
 		params = append(params, v)
 	}
