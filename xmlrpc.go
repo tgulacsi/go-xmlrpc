@@ -33,8 +33,8 @@ func SetLogger(lgr *log.Logger) *log.Logger {
 
 var Unsupported = errors.New("Unsupported type")
 
-type Array []interface{}
-type Struct map[string]interface{}
+// type Array []interface{}
+// type Struct map[string]interface{}
 type Fault struct {
 	Code    int
 	Message string
@@ -162,7 +162,7 @@ func (st *state) next() (nm xml.Name, nv interface{}, e error) {
 		st.level++             // Entering new struct level. Increase global level.
 		localLevel := st.level // And set local to current.
 
-		strct := make(Struct)
+		strct := make(map[string]interface{}, 8)
 
 		if se, e = st.nextStart(); e != nil {
 			return
@@ -195,12 +195,13 @@ func (st *state) next() (nm xml.Name, nv interface{}, e error) {
 				e = fmt.Errorf("invalid response: found '%s', required 'value'", se.Name.Local)
 				return
 			}
-			strct[name] = value
 
 			// log.Print("struct sl=", st.level, " ll=", localLevel)
 			if localLevel > st.level { // We came up from higher level. We're already on a Start.
+				// st.remainder = &value
 				break
 			}
+			strct[name] = value
 			se, e = st.nextStart()
 			// log.Print("last se=", se.Name.Local)
 		}
@@ -218,7 +219,7 @@ func (st *state) next() (nm xml.Name, nv interface{}, e error) {
 			e = fmt.Errorf("found '%s' instead of 'data'", se.Name.Local)
 			return
 		}
-		ar := make(Array, 0, 8)
+		ar := make([]interface{}, 0, 8)
 		var value interface{}
 		for {
 			_, value, e = st.next()
