@@ -73,166 +73,209 @@ type valueNode struct {
 	Body string `xml:",chardata"`
 }
 
-func next(p *xml.Decoder, structLevel int) (nm xml.Name, structLeve int, nv interface{}, e error) {
-	var se xml.StartElement
-	if se, structLevel, e = nextStart(p, structLevel); e != nil {
+type state struct {
+	p         *xml.Decoder
+	level     int
+	remainder *interface{}
+}
+
+func newParser(p *xml.Decoder) *state {
+	return &state{p, 0, nil}
+}
+
+func (st *state) next() (nm xml.Name, nv interface{}, e error) {
+	if st.remainder != nil {
+		nv = *st.remainder
+		st.remainder = nil
 		return
 	}
+	if st.level < 0 {
+		panic("st.level < 0")
+	}
+	var se xml.StartElement
+	if se, e = st.nextStart(); e != nil {
+		return
+	}
+	// log.Print("next level:", st.level, " meets <", se.Name.Local, ">")
 
 	var vn valueNode
 	switch se.Name.Local {
 	case "boolean":
-		if e = p.DecodeElement(&vn, &se); e != nil {
+		if e = st.p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
 		b, e := strconv.ParseBool(vn.Body)
-		return xml.Name{}, structLevel, b, e
+		return xml.Name{}, b, e
 	case "string":
-		if e = p.DecodeElement(&vn, &se); e != nil {
+		if e = st.p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
-		return xml.Name{}, structLevel, vn.Body, nil
-	case "int", "i1", "i2", "i4", "i8":
-		if e = p.DecodeElement(&vn, &se); e != nil {
+		return xml.Name{}, vn.Body, nil
+	case "int", "i4":
+		if e = st.p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
 		i, e := strconv.ParseInt(strings.TrimSpace(vn.Body), 10, 64)
-		return xml.Name{}, structLevel, i, e
+		return xml.Name{}, i, e
 	case "double":
-		if e = p.DecodeElement(&vn, &se); e != nil {
+		if e = st.p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
 		f, e := strconv.ParseFloat(strings.TrimSpace(vn.Body), 64)
-		return xml.Name{}, structLevel, f, e
+		return xml.Name{}, f, e
 	case "dateTime.iso8601":
-		if e = p.DecodeElement(&vn, &se); e != nil {
+		if e = st.p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
-		t, e := time.Parse(DenseXmlRpcTime, vn.Body)
-		if e != nil {
-			t, e = time.Parse(FullXmlRpcTime, vn.Body)
-			if e != nil {
-				t, e = time.Parse(LocalXmlRpcTime, vn.Body)
+		var t time.Time
+		for _, format := range []string{FullXmlRpcTime, LocalXmlRpcTime, DenseXmlRpcTime} {
+			t, e = time.Parse(format, vn.Body)
+			// log.Print("txt=", vn.Body, " t=", t, " fmt=", format, " e=", e)
+			if e == nil {
+				break
 			}
 		}
-		return xml.Name{}, structLevel, t, e
+		return xml.Name{}, t, e
 	case "base64":
-		if e = p.DecodeElement(&vn, &se); e != nil {
+		if e = st.p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
 		var b []byte
 		if b, e = base64.StdEncoding.DecodeString(vn.Body); e != nil {
 			return
 		} else {
-			return xml.Name{}, structLevel, b, nil
+			return xml.Name{}, b, nil
 		}
 	case "member":
-		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+		if _, e = st.nextStart(); e != nil {
 			return
 		}
-		return next(p, structLevel)
+		return st.next()
 	case "value":
-		if _, structLevel, e = nextStart(p, structLevel); e != nil {
-			return
-		}
-		return next(p, structLevel)
+		return st.next()
 	case "name":
-		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+		if _, e = st.nextStart(); e != nil {
 			return
 		}
-		return next(p, structLevel)
+		return st.next()
 	case "struct":
-		structLevel++             // Entering new struct level. Increase global level.
-		localLevel := structLevel // And set local to current.
+		st.level++             // Entering new struct level. Increase global level.
+		localLevel := st.level // And set local to current.
 
-		st := Struct{}
+		strct := make(Struct)
 
-		if se, structLevel, e = nextStart(p, structLevel); e != nil {
+		if se, e = st.nextStart(); e != nil {
 			return
 		}
 		var value interface{}
 		var name string
 		for e == nil && se.Name.Local == "member" {
 			// name
-			if se, structLevel, e = nextStart(p, structLevel); e != nil {
+			if se, e = st.nextStart(); e != nil {
 				return
 			}
 			if se.Name.Local != "name" {
 				e = fmt.Errorf("invalid response: start element is '%s', not 'name'", se.Name.Local)
 				return
 			}
-			if e = p.DecodeElement(&vn, &se); e != nil {
+			if e = st.p.DecodeElement(&vn, &se); e != nil {
 				return
 			}
 			name = vn.Body
-			if se, structLevel, e = nextStart(p, structLevel); e != nil {
+			// log.Print("  struct name=", name)
+			if se, e = st.nextStart(); e != nil {
 				return
 			}
 
 			// value
-			if _, structLevel, value, e = next(p, structLevel); e != nil {
+			if _, value, e = st.next(); e != nil {
 				return
 			}
 			if se.Name.Local != "value" {
 				e = fmt.Errorf("invalid response: found '%s', required 'value'", se.Name.Local)
 				return
 			}
-			st[name] = value
+			strct[name] = value
 
-			if localLevel > structLevel { // We came up from higher level. We're already on a Start.
+			// log.Print("struct sl=", st.level, " ll=", localLevel)
+			if localLevel > st.level { // We came up from higher level. We're already on a Start.
 				break
 			}
-			if se, structLevel, e = nextStart(p, structLevel); e != nil {
-				return
-			}
+			se, e = st.nextStart()
+			// log.Print("last se=", se.Name.Local)
 		}
-		return xml.Name{}, structLevel, st, nil
+		// log.Print("struct returns with sl=", st.level, " st=", st)
+		return xml.Name{}, strct, nil
 	case "array":
-		var ar Array
+		st.level++             // Entering new struct level. Increase global level.
+		localLevel := st.level // And set local to current.
+
 		// data
-		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+		if se, e = st.nextStart(); e != nil {
 			return
 		}
-		// top of value
-		if _, structLevel, e = nextStart(p, structLevel); e != nil {
+		if se.Name.Local != "data" {
+			e = fmt.Errorf("found '%s' instead of 'data'", se.Name.Local)
 			return
 		}
+		ar := make(Array, 0, 8)
 		var value interface{}
 		for {
-			if _, structLevel, value, e = next(p, structLevel); e != nil {
+			_, value, e = st.next()
+			// log.Print("array se=", se.Name.Local, " sl=", st.level,
+			// 	" ll=", localLevel, " val=", value, " e=", e)
+			if e != nil {
+				if e == io.EOF {
+					break
+				}
+				return
+			}
+			// log.Print("array sl=", st.level, " ll=", localLevel)
+			if localLevel > st.level { // We came up from higher level. We're already on a Start.
+				st.remainder = &value
 				break
 			}
 			ar = append(ar, value)
 		}
-		return xml.Name{}, structLevel, ar, nil
+		// log.Print("array returns ", ar)
+		return xml.Name{}, ar, nil
 	}
 
-	if e = p.DecodeElement(nv, &se); e != nil {
+	if e = st.p.DecodeElement(nv, &se); e != nil {
 		return
 	}
-	return se.Name, structLevel, nv, e
+	return se.Name, nv, e
 }
 
 // jumps to the next start element, returns it
-func nextStart(p *xml.Decoder, sl int) (xml.StartElement, int, error) {
+func (st *state) nextStart() (xml.StartElement, error) {
+	if st.level < 0 {
+		panic("st.level < 0")
+	}
 	for {
-		t, e := p.Token()
+		t, e := st.p.Token()
 		if e != nil {
-			return xml.StartElement{}, sl, e
+			if e != io.EOF {
+				log.Printf("error going to next token:", e)
+			}
+			return xml.StartElement{}, e
 		}
 		switch t := t.(type) {
 		case xml.StartElement:
-			return t, sl, nil
+			return t, nil
 		case xml.EndElement:
-			if t.Name.Local == "struct" { // Found struct end. Decrease struct level.
-				sl--
+			// log.Print("nextStart jumps </", t.Name.Local, ">", " level=", st.level)
+			if t.Name.Local == "struct" || t.Name.Local == "array" { // Found struct end. Decrease struct level.
+				st.level--
+				if st.level < 0 {
+					panic("st.level < 0")
+				}
 			}
 		}
 	}
 	panic("unreachable")
 }
 
-<<<<<<< HEAD
 func to_xml(v interface{}, typ bool) (s string) {
 	r := reflect.ValueOf(v)
 	t := r.Type()
@@ -311,20 +354,12 @@ func to_xml(v interface{}, typ bool) (s string) {
 }
 
 func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
-	s := "<methodCall>"
-	s += "<methodName>" + xmlEscape(name) + "</methodName>"
-	s += "<params>"
-	buf := bytes.NewBuffer(nil)
-	for _, arg := range args {
-		s += "<param><value>"
-		WriteXml(buf, arg, true)
-		s += buf.String() // Warning changed typed arguments to TRUE !
-		s += "</value></param>"
-		buf.Reset()
+	req := bytes.NewBuffer(nil)
+	e := Marshal(req, name, args...)
+	if e != nil {
+		return nil, nil, e
 	}
-	s += "</params></methodCall>"
-	bs := bytes.NewBuffer([]byte(s))
-	r, e := http.Post(url, "text/xml", bs)
+	r, e := http.Post(url, "text/xml", req)
 	if e != nil {
 		return nil, nil, e
 	}
@@ -344,11 +379,11 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		length := base64.StdEncoding.EncodedLen(len(b))
 		dst := make([]byte, length)
 		base64.StdEncoding.Encode(dst, b)
-		_, err = w.Write(dst)
+		_, err = taggedWrite(w, []byte("base64"), dst)
 		return
 	}
 	if tim, ok := v.(time.Time); ok {
-		_, err = taggedWrite(w, "dateTime.iso8601", tim.Format(FullXmlRpcTime))
+		_, err = taggedWriteString(w, "dateTime.iso8601", tim.Format(FullXmlRpcTime))
 		return
 	}
 
@@ -425,7 +460,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 				return
 			}
 		}
-		_, err = io.WriteString(w, "</struct")
+		_, err = io.WriteString(w, "</struct>")
 		return
 	case reflect.Ptr:
 		return Unsupported
@@ -470,7 +505,19 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	return
 }
 
-func taggedWrite(w io.Writer, tag, inner string) (n int, err error) {
+func taggedWrite(w io.Writer, tag, inner []byte) (n int, err error) {
+	var j int
+	for _, elt := range [][]byte{[]byte("<"), tag, []byte(">"), inner,
+		[]byte("</"), tag, []byte(">")} {
+		j, err = w.Write(elt)
+		n += j
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+func taggedWriteString(w io.Writer, tag, inner string) (n int, err error) {
 	if n, err = io.WriteString(w, "<"+tag+">"); err != nil {
 		return
 	}
@@ -525,10 +572,10 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 
 func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e error) {
 	p := xml.NewDecoder(r)
-	structLevel := 0
-	se, structLevel, e := nextStart(p, structLevel) // methodResponse or methodCall
+	st := newParser(p)
+	se, e := st.nextStart() // methodResponse or methodCall
 	if se.Name.Local != "methodResponse" {
-		se, structLevel, e = nextStart(p, structLevel) // methodName
+		se, e = st.nextStart() // methodName
 		if se.Name.Local != "methodName" {
 			e = fmt.Errorf("invalid call: requred 'methodName', found '%s'", se.Name.Local)
 			return
@@ -545,7 +592,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 		}
 		name = string(d.Copy())
 	}
-	se, structLevel, e = nextStart(p, structLevel) // params
+	se, e = st.nextStart() // params
 	if se.Name.Local != "params" {
 		e = fmt.Errorf("invalid response: required 'params', found '%s'", se.Name.Local)
 		return
@@ -554,7 +601,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	var v interface{}
 	for {
 		// param
-		if se, structLevel, e = nextStart(p, structLevel); e != nil {
+		if se, e = st.nextStart(); e != nil {
 			if e == io.EOF {
 				e = nil
 				break
@@ -566,7 +613,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 			return
 		}
 		// value
-		if se, structLevel, e = nextStart(p, structLevel); e != nil {
+		if se, e = st.nextStart(); e != nil {
 			if e == io.EOF {
 				e = nil
 				break
@@ -577,7 +624,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 			e = fmt.Errorf("invalid response: required 'value', found '%s'", se.Name.Local)
 			return
 		}
-		if _, structLevel, v, e = next(p, structLevel); e != nil {
+		if _, v, e = st.next(); e != nil {
 			if e == io.EOF {
 				e = nil
 				if v != nil {
