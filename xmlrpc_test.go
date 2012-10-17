@@ -64,27 +64,31 @@ var XmlCallStruct = []interface{}{int(41), int(42), true,
 	"!last field!",
 }
 
-func TestResponse(t *testing.T) {
-	name, c, fault, err := Unmarshal(bytes.NewBufferString(XmlCallString))
+func TestMarshalCall(t *testing.T) {
+	name, c, _, err := Unmarshal(bytes.NewBufferString(XmlCallString))
 	if err != nil {
 		t.Fatal("error unmarshaling XmlCall:", err)
 	}
 	fmt.Printf("unmarshalled call[%s]: %v\n", name, c)
+}
 
-	name, c, fault, err = Unmarshal(bytes.NewBufferString(XmlResponse))
+func TestUnmarshalResponse(t *testing.T) {
+	name, c, fault, err := Unmarshal(bytes.NewBufferString(XmlResponse))
 	if err != nil {
 		t.Fatal("error unmarshaling XmlResponse:", err)
 	}
 	fmt.Printf("unmarshalled response[%s]: %+v\n%s\n", name, c, fault)
+}
 
+func TestMarshalling(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	err = Marshal(buf, "trial", XmlCallStruct)
+	err := Marshal(buf, "trial", XmlCallStruct)
 	if err != nil {
 		t.Fatal("error marshalling XmlCallStruct:", err)
 	}
 	fmt.Printf("marshalled %+v\n:\n%s\n", XmlCallStruct, buf.Bytes())
 
-	name, c, fault, err = Unmarshal(buf)
+	name, c, _, err := Unmarshal(buf)
 	if err != nil {
 		t.Fatal("cannot unmarshal previously marshalled struct:", err)
 	}

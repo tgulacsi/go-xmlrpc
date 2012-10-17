@@ -78,217 +78,217 @@ type state struct {
 	p         *xml.Decoder
 	level     int
 	remainder *interface{}
-	last      xml.StartElement
+	last      *xml.Token
 }
 
 func newParser(p *xml.Decoder) *state {
-	return &state{p, 0, nil, xml.StartElement{}}
+	return &state{p, 0, nil, nil}
 }
 
-func (st *state) next() (nm xml.Name, nv interface{}, e error) {
-	if st.remainder != nil {
-		nv = *st.remainder
-		st.remainder = nil
-		return
-	}
-	if st.level < 0 {
-		panic("st.level < 0")
-	}
+const (
+	tokStart = iota
+	tokText
+	tokStop
+)
+
+var (
+	notStartElement = errors.New("not start element")
+	nameMismatch    = errors.New("not the required token")
+	notEndElement   = errors.New("not end element")
+)
+
+func (st *state) parseValue() (nv interface{}, e error) {
 	var se xml.StartElement
-	for {
-		se, e = st.nextStart()
-		if e == nil {
-			if se.Name.Local == "param" {
-				e = levelDecremented
-				return
-			}
-			break
-		} else if e != nil && e != levelDecremented {
-			return
-		}
-	}
-	log.Print("next level:", st.level, " meets <", se.Name.Local, ">")
-
-	var vn valueNode
-	switch se.Name.Local {
-	case "boolean":
-		if e = st.p.DecodeElement(&vn, &se); e != nil {
-			return
-		}
-		b, e := strconv.ParseBool(vn.Body)
-		return xml.Name{}, b, e
-	case "string":
-		if e = st.p.DecodeElement(&vn, &se); e != nil {
-			return
-		}
-		return xml.Name{}, vn.Body, nil
-	case "int", "i4":
-		if e = st.p.DecodeElement(&vn, &se); e != nil {
-			return
-		}
-		i, e := strconv.ParseInt(strings.TrimSpace(vn.Body), 10, 64)
-		return xml.Name{}, i, e
-	case "double":
-		if e = st.p.DecodeElement(&vn, &se); e != nil {
-			return
-		}
-		f, e := strconv.ParseFloat(strings.TrimSpace(vn.Body), 64)
-		return xml.Name{}, f, e
-	case "dateTime.iso8601":
-		if e = st.p.DecodeElement(&vn, &se); e != nil {
-			return
-		}
-		var t time.Time
-		for _, format := range []string{FullXmlRpcTime, LocalXmlRpcTime, DenseXmlRpcTime} {
-			t, e = time.Parse(format, vn.Body)
-			// log.Print("txt=", vn.Body, " t=", t, " fmt=", format, " e=", e)
-			if e == nil {
-				break
-			}
-		}
-		return xml.Name{}, t, e
-	case "base64":
-		if e = st.p.DecodeElement(&vn, &se); e != nil {
-			return
-		}
-		var b []byte
-		if b, e = base64.StdEncoding.DecodeString(vn.Body); e != nil {
-			return
-		} else {
-			return xml.Name{}, b, nil
-		}
-	case "member":
-		if _, e = st.nextStart(); e != nil {
-			return
-		}
-		return st.next()
-	case "value":
-		return st.next()
-	case "name":
-		if _, e = st.nextStart(); e != nil {
-			return
-		}
-		return st.next()
-	case "struct":
-		st.level++ // Entering new struct level. Increase global level.
-		// localLevel := st.level // And set local to current.
-
-		strct := make(map[string]interface{}, 8)
-
-		if se, e = st.nextStart(); e != nil {
-			log.Println("struct first step error:", e)
-			return
-		}
-		var value interface{}
-		var name string
-		for e == nil && se.Name.Local == "member" {
-			// name
-			if se, e = st.nextStart(); e != nil {
-				return
-			}
-			if se.Name.Local != "name" {
-				e = fmt.Errorf("invalid response: start element is '%s', not 'name'", se.Name.Local)
-				return
-			}
-			if e = st.p.DecodeElement(&vn, &se); e != nil {
-				return
-			}
-			name = vn.Body
-			// log.Print("  struct name=", name)
-			if se, e = st.nextStart(); e != nil {
-				return
-			}
-
-			// value
-			if _, value, e = st.next(); e != nil {
-				return
-			}
-			if se.Name.Local != "value" {
-				e = fmt.Errorf("invalid response: found '%s', required 'value'", se.Name.Local)
-				return
-			}
-
-			strct[name] = value
-			se, e = st.nextStart()
-			// log.Print("last se=", se.Name.Local)
-		}
-		// log.Print("struct returns with sl=", st.level, " strct=", strct, " e=", e)
-		if e == levelDecremented {
+	if se, e = st.getStart(""); e != nil {
+		if e == notStartElement {
 			e = nil
 		}
-		return xml.Name{}, strct, e
-	case "array":
-		st.level++ // Entering new struct level. Increase global level.
-		// localLevel := st.level // And set local to current.
+		return
+	}
 
-		// data
-		if se, e = st.nextStart(); e != nil {
-			log.Println("array first step returns with ", e)
+	// log.Printf("parseValue(%s)", se.Name.Local)
+	var vn valueNode
+	switch se.Name.Local {
+	case "value":
+		if nv, e = st.parseValue(); e == nil {
+			// log.Printf("searching for /value")
+			e = st.checkLast("value")
+		}
+		return
+	case "boolean", "string", "int", "i1", "i2", "i4", "i8", "double", "dateTime.iso8601", "base64": //simple
+		st.last = nil
+		if e = st.p.DecodeElement(&vn, &se); e != nil {
 			return
 		}
-		if se.Name.Local != "data" {
-			e = fmt.Errorf("found '%s' instead of 'data'", se.Name.Local)
-			return
+		switch se.Name.Local {
+		case "boolean":
+			nv, e = strconv.ParseBool(vn.Body)
+		case "string":
+			nv = vn.Body
+		case "int", "i4":
+			nv, e = strconv.ParseInt(vn.Body, 10, 64)
+		case "double":
+			nv, e = strconv.ParseFloat(vn.Body, 64)
+		case "dateTime.iso8601":
+			for _, format := range []string{FullXmlRpcTime, LocalXmlRpcTime, DenseXmlRpcTime} {
+				nv, e = time.Parse(format, vn.Body)
+				// log.Print("txt=", vn.Body, " t=", t, " fmt=", format, " e=", e)
+				if e == nil {
+					break
+				}
+			}
+		case "base64":
+			nv, e = base64.StdEncoding.DecodeString(vn.Body)
 		}
-		ar := make([]interface{}, 0, 8)
-		var value interface{}
+		return
+
+	case "struct":
+		var name string
+		values := make(map[string]interface{}, 4)
+		nv = values
 		for {
-			_, value, e = st.next()
-			// log.Print("array se=", se.Name.Local, " sl=", st.level,
-			// 	" val=", value, " e=", e)
-			if e != nil {
-				if e == io.EOF {
-					if value != nil {
-						ar = append(ar, value)
-					}
+			// log.Printf("struct searching for member")
+			if se, e = st.getStart("member"); e != nil {
+				if e == notStartElement {
+					e = st.checkLast("struct")
 					break
 				}
 				return
 			}
-			ar = append(ar, value)
+			if name, e = st.getText("name"); e != nil {
+				return
+			}
+			if se, e = st.getStart("value"); e != nil {
+				return
+			}
+			if values[name], e = st.parseValue(); e != nil {
+				return
+			}
+			if e = st.checkLast("value"); e != nil {
+				log.Printf("didn't found last value element for struct member")
+				return
+			}
+			if e = st.checkLast("member"); e != nil {
+				return
+			}
 		}
-		if e == levelDecremented {
-			e = nil
-		}
-		// log.Print("array returns ", ar)
-		return xml.Name{}, ar, e
-	}
-
-	if e = st.p.DecodeElement(nv, &se); e != nil {
 		return
+
+	case "array":
+		values := make([]interface{}, 0, 4)
+		var val interface{}
+		// log.Printf("array searching for data")
+		if _, e = st.getStart("data"); e != nil {
+			return
+		}
+		for {
+			if se, e = st.getStart("value"); e != nil {
+				// log.Printf("array parsing ends with %s", e)
+				if e == notStartElement {
+					e = nil //st.checkLast("data")
+					break
+				}
+				return
+			}
+			if val, e = st.parseValue(); e != nil {
+				return
+			}
+			values = append(values, val)
+			if e = st.checkLast("value"); e != nil {
+				log.Printf("didn't find value end for array")
+				return
+			}
+		}
+		if e = st.checkLast("data"); e == nil {
+			e = st.checkLast("array")
+		}
+		nv = values
+		return
+	default:
+		e = fmt.Errorf("cannot parse unknown tag %s", se)
 	}
-	return se.Name, nv, e
+	return
 }
 
-// jumps to the next start element, returns it
-func (st *state) nextStart() (xml.StartElement, error) {
-	if st.level < 0 {
-		panic("st.level < 0")
+func (st *state) token(typ int, name string) (t xml.Token, body string, e error) {
+	// var ok bool
+	if st.last != nil {
+		t = *st.last
+		st.last = nil
 	}
+Reading:
 	for {
-		t, e := st.p.Token()
-		if e != nil {
-			if e != io.EOF {
-				log.Printf("error going to next token:", e)
-			}
-			return xml.StartElement{}, e
+		switch t.(type) {
+		case xml.StartElement, xml.EndElement:
+			break Reading
+		default:
+			// log.Printf("discarded %s %T", t, t)
 		}
-		switch t := t.(type) {
-		case xml.StartElement:
-			st.last = t
-			return t, nil
-		case xml.EndElement:
-			// log.Print("nextStart jumps </", t.Name.Local, ">", " level=", st.level)
-			if t.Name.Local == "struct" || t.Name.Local == "array" { // Found struct end. Decrease struct level.
-				st.level--
-				return xml.StartElement{}, levelDecremented
-				// if st.level < 0 {
-				// 	panic("st.level < 0")
-				// }
-			}
+		if t, e = st.p.Token(); e != nil {
+			return
 		}
 	}
-	panic("unreachable")
+	// log.Printf("token %s %T", t, t)
+	switch typ {
+	case tokStart, tokText:
+		se, ok := t.(xml.StartElement)
+		if !ok {
+			// log.Printf("required startelement(%s), found %s %T", name, t, t)
+			st.last = &t
+			e = notStartElement
+			return
+		}
+		switch typ {
+		case tokStart:
+			if name != "" && se.Name.Local != name {
+				// log.Printf("required <%s>, found <%s>", name, se.Name.Local)
+				e = nameMismatch
+				return
+			}
+		default:
+			var vn valueNode
+			if e = st.p.DecodeElement(&vn, &se); e != nil {
+				return
+			}
+			body = vn.Body
+		}
+	default:
+		ee, ok := t.(xml.EndElement)
+		if !ok {
+			log.Printf("required endelement(%s), found %s %T", name, t, t)
+			st.last = &t
+			e = notEndElement
+			return
+		}
+		if name != "" && ee.Name.Local != name {
+			log.Printf("required </%s>, found </%s>", name, ee.Name.Local)
+			e = nameMismatch
+			return
+		}
+	}
+	// log.Printf("  .")
+	return
+}
+
+func (st *state) getStart(name string) (se xml.StartElement, e error) {
+	var t xml.Token
+	t, _, e = st.token(tokStart, name)
+	if e != nil {
+		return
+	}
+	se = t.(xml.StartElement)
+	return
+}
+
+func (st *state) getText(name string) (text string, e error) {
+	_, text, e = st.token(tokText, name)
+	return
+}
+
+func (st *state) checkLast(name string) (e error) {
+	_, _, e = st.token(tokStop, name)
+	// log.Printf("  l")
+	return
 }
 
 func to_xml(v interface{}, typ bool) (s string) {
@@ -587,67 +587,36 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e error) {
 	p := xml.NewDecoder(r)
 	st := newParser(p)
-	se, e := st.nextStart() // methodResponse or methodCall
-	if se.Name.Local != "methodResponse" {
-		se, e = st.nextStart() // methodName
-		if se.Name.Local != "methodName" {
-			e = fmt.Errorf("invalid call: requred 'methodName', found '%s'", se.Name.Local)
+	typ := "methodResponse"
+	if _, e = st.getStart(typ); e == nameMismatch { // methodResponse or methodCall
+		typ = "methodCall"
+		if name, e = st.getText("methodName"); e != nil {
 			return
 		}
-		t, err := p.Token()
-		if err != nil {
-			e = err
-			return
-		}
-		d, ok := t.(xml.CharData)
-		if !ok {
-			e = fmt.Errorf("invalid call: required call name, found '%v'", t)
-			return
-		}
-		name = string(d.Copy())
 	}
-	se, e = st.nextStart() // params
-	if se.Name.Local != "params" {
-		e = fmt.Errorf("invalid response: required 'params', found '%s'", se.Name.Local)
+	if _, e = st.getStart("params"); e != nil {
 		return
 	}
 	params = make([]interface{}, 0, 8)
 	var v interface{}
-	// param
-	if se, e = st.nextStart(); e != nil {
-		if e == io.EOF {
-			e = nil
-		}
-		return
-	}
-	if se.Name.Local != "param" {
-		e = fmt.Errorf("invalid response: required 'param', found '%s'", se.Name.Local)
-		return
-	}
 	for {
-		if st.last.Name.Local != "param" {
-			if se, e = st.nextStart(); e != nil {
-				if e == io.EOF {
-					e = nil
-				}
-				return
+		if _, e = st.getStart("param"); e != nil {
+			if e == notStartElement {
+				e = nil
+				break
 			}
-
+			return
 		}
-		if _, v, e = st.next(); e != nil {
-			log.Println("nxt=", e, " v=", v)
-			if e != levelDecremented {
-				if e == io.EOF {
-					e = nil
-					if v != nil {
-						params = append(params, v)
-					}
-					break
-				}
-				return
-			}
+		if v, e = st.parseValue(); e != nil {
+			break
 		}
 		params = append(params, v)
+		if e = st.checkLast("param"); e != nil {
+			return
+		}
+	}
+	if e = st.checkLast("params"); e == nil {
+		e = st.checkLast(typ)
 	}
 	return
 }
