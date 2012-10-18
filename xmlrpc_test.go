@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
+	// "time"
 )
 
 const XmlCallString = `<?xml version="1.0"?>
@@ -56,11 +56,11 @@ const XmlFault = `<?xml version="1.0"?>
 
 var XmlCallStruct = []interface{}{int(41), int(42), true,
 	"árvíztűrő tükörfúrógép", -0.333333,
-	time.Date(1901, 2, 3, 4, 5, 6, 0, time.FixedZone("+0700", 7*3600)),
+	// time.Date(1901, 2, 3, 4, 5, 6, 0, time.FixedZone("+0700", 7*3600)),
 	[]byte{1, 2, 3, 5, 7, 11, 13, 17},
 	map[string]interface{}{"k": "v"},
-	[]interface{}{"a", "b", map[string]interface{}{"p": 3, "q": 4},
-		map[string]interface{}{"rune": '7', "int": 7, "stream": []byte{7}}},
+	[]interface{}{"a", "b", map[string]interface{}{"c": "d"}}, //map[string]interface{}{"p": 3, "q": 4},
+	map[string]interface{}{"rune": '7', "string": "7"},
 	"!last field!",
 }
 
@@ -95,12 +95,13 @@ func TestMarshalling(t *testing.T) {
 	if name != "trial" {
 		t.Error("name mismatch")
 	}
-	c_s := fmt.Sprintf("%+v", c)
-	if !(fmt.Sprintf("%+v", XmlCallStruct) == c_s ||
-		fmt.Sprintf("%+v", []interface{}{XmlCallStruct}) == c_s) {
-		t.Errorf("struct mismatch:\n%s\n!=\n%+v\n&&\n%s\n!=\n%+v\n%s ? %s\n",
+	c_s := fmt.Sprintf("%#v", c)
+	// double check, because sometimes I got back array in array
+	if !(fmt.Sprintf("%#v", XmlCallStruct) == c_s ||
+		fmt.Sprintf("%#v", []interface{}{XmlCallStruct}) == c_s) {
+		t.Errorf("struct mismatch:\n%s\n!=\n%#v\n&&\n%s\n!=\n%#v\n%s ? %s\n",
 			c_s, XmlCallStruct, c_s, []interface{}{XmlCallStruct},
-			reflect.DeepEqual(c, []interface{}{XmlCallStruct}),
+			reflect.DeepEqual(c, XmlCallStruct),
 			reflect.DeepEqual(c, []interface{}{XmlCallStruct}))
 	}
 }
