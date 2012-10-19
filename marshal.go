@@ -47,6 +47,12 @@ func (f Fault) String() string {
 func (f Fault) Error() string {
 	return f.String()
 }
+func (f Fault) WriteXml(w io.Writer) (int, error) {
+	return fmt.Fprintf(w, `<fault><value><struct>
+			<member><name>faultCode</name><value><int>%d</int></value></member>
+			<member><name>faultString</name><value><string>%s</string></value></member>
+			</struct></value></fault>`, f.Code, xmlEscape(f.Message))
+}
 
 var xmlSpecial = map[byte]string{
 	'<':  "&lt;",
@@ -218,13 +224,27 @@ func (st *state) token(typ int, name string) (t xml.Token, body string, e error)
 	}
 Reading:
 	for {
-		switch t.(type) {
-		case xml.StartElement, xml.EndElement:
-			break Reading
-		default:
-			// log.Printf("discarded %s %T", t, t)
+		if t != nil {
+			switch t.(type) {
+			case xml.StartElement:
+				se := t.(xml.StartElement)
+				if se.Name.Local != "" {
+					break Reading
+				}
+			case xml.EndElement:
+				ee := t.(xml.EndElement)
+				if ee.Name.Local != "" {
+					break Reading
+				}
+			default:
+				log.Printf("discarded %s %T", t, t)
+			}
 		}
 		if t, e = st.p.Token(); e != nil {
+			return
+		}
+		if t == nil {
+			e = errors.New("nil token")
 			return
 		}
 	}
@@ -386,6 +406,11 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 
 func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	logger.SetPrefix("WriteXml")
+
+	if fp, ok := getFault(v); ok {
+		_, err = fp.WriteXml(w)
+		return
+	}
 	if b, ok := v.([]byte); ok {
 		length := base64.StdEncoding.EncodedLen(len(b))
 		dst := make([]byte, length)
@@ -551,6 +576,17 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 		if _, err = io.WriteString(w, "<methodResponse>"); err != nil {
 			return
 		}
+		if len(args) > 0 {
+			fp, ok := getFault(args[0])
+			// log.Printf("fault (%+v)? %s", args[0], ok)
+			if ok {
+				_, err = fp.WriteXml(w)
+				if err == nil {
+					_, err = io.WriteString(w, "\n</methodResponse>")
+				}
+				return
+			}
+		}
 	} else {
 		if _, err = io.WriteString(w, "<methodCall><methodName>"); err != nil {
 			return
@@ -584,6 +620,23 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 	return err
 }
 
+func getFault(v interface{}) (*Fault, bool) {
+	// log.Printf("getFault(%+v %T)", v, v)
+	if f, ok := v.(Fault); ok {
+		// log.Printf("  yes")
+		return &f, true
+	} else {
+		if f, ok := v.(*Fault); ok {
+			if f != nil {
+				// log.Printf("  yes")
+				return f, true
+			}
+		}
+	}
+	// log.Printf("  no")
+	return nil, false
+}
+
 func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e error) {
 	p := xml.NewDecoder(r)
 	st := newParser(p)
@@ -594,7 +647,43 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 			return
 		}
 	}
-	if _, e = st.getStart("params"); e != nil {
+	var se xml.StartElement
+	if se, e = st.getStart("params"); e != nil {
+		log.Printf("not params, but %s (%s)", se.Name.Local, e)
+		if e == nameMismatch && se.Name.Local == "fault" {
+			var v interface{}
+			if v, e = st.parseValue(); e != nil {
+				return
+			}
+			if fmap, ok := v.(map[string]interface{}); !ok {
+				e = fmt.Errorf("fault not fault: %+v", v)
+				return
+			} else {
+				fault = &Fault{Code: -1, Message: ""}
+				code, ok := fmap["faultCode"]
+				if !ok {
+					e = fmt.Errorf("no faultCode in fault: %v", fmap)
+					return
+				}
+				fcode, ok := code.(int64)
+				if !ok {
+					e = fmt.Errorf("faultCode not int? %v", code)
+					return
+				}
+				fault.Code = int(fcode)
+				msg, ok := fmap["faultString"]
+				if !ok {
+					e = fmt.Errorf("no faultString in fault: %v", fmap)
+					return
+				}
+				if fault.Message, ok = msg.(string); !ok {
+					e = fmt.Errorf("faultString not strin? %v", msg)
+					return
+				}
+				e = nil
+			}
+			e = st.checkLast("fault")
+		}
 		return
 	}
 	params = make([]interface{}, 0, 8)

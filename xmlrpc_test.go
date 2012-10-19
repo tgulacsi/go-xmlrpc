@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
-	// "time"
 )
 
 const XmlCallString = `<?xml version="1.0"?>
@@ -36,8 +36,7 @@ const XmlResponse = `<?xml version="1.0"?>
       </params>
    </methodResponse>`
 
-const XmlFault = `<?xml version="1.0"?>
-<methodResponse>
+const XmlFault = `<methodResponse>
    <fault>
       <value>
          <struct>
@@ -60,7 +59,7 @@ var XmlCallStruct = []interface{}{int(41), int(42), true,
 	[]byte{1, 2, 3, 5, 7, 11, 13, 17},
 	map[string]interface{}{"k": "v"},
 	[]interface{}{"a", "b", map[string]interface{}{"c": "d"}}, //map[string]interface{}{"p": 3, "q": 4},
-	map[string]interface{}{"rune": '7', "string": "7"},
+	map[string]interface{}{"rune": "0x07", "string": "7"},
 	"!last field!",
 }
 
@@ -69,7 +68,7 @@ func TestMarshalCall(t *testing.T) {
 	if err != nil {
 		t.Fatal("error unmarshaling XmlCall:", err)
 	}
-	fmt.Printf("unmarshalled call[%s]: %v\n", name, c)
+	t.Logf("unmarshalled call[%s]: %v\n", name, c)
 }
 
 func TestUnmarshalResponse(t *testing.T) {
@@ -77,7 +76,7 @@ func TestUnmarshalResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal("error unmarshaling XmlResponse:", err)
 	}
-	fmt.Printf("unmarshalled response[%s]: %+v\n%s\n", name, c, fault)
+	t.Logf("unmarshalled response[%s]: %+v\n%s\n", name, c, fault)
 }
 
 func TestMarshalling(t *testing.T) {
@@ -86,7 +85,7 @@ func TestMarshalling(t *testing.T) {
 	if err != nil {
 		t.Fatal("error marshalling XmlCallStruct:", err)
 	}
-	fmt.Printf("marshalled %+v\n:\n%s\n", XmlCallStruct, buf.Bytes())
+	t.Logf("marshalled %+v\n:\n%s\n", XmlCallStruct, buf.Bytes())
 
 	name, c, _, err := Unmarshal(buf)
 	if err != nil {
@@ -103,5 +102,36 @@ func TestMarshalling(t *testing.T) {
 			c_s, XmlCallStruct, c_s, []interface{}{XmlCallStruct},
 			reflect.DeepEqual(c, XmlCallStruct),
 			reflect.DeepEqual(c, []interface{}{XmlCallStruct}))
+	}
+}
+
+func TestFault(t *testing.T) {
+	f := &Fault{Code: 4, Message: "Too many parameters."}
+	buf := bytes.NewBuffer(nil)
+	err := Marshal(buf, "", f)
+	if err != nil {
+		t.Fatal("error marshalling Fault: %s", err)
+	}
+	t.Logf("marshalled fault: %s", buf.Bytes())
+
+	repl := func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+			return -1
+		}
+		return r
+	}
+	f1_s := strings.Map(repl, buf.String())
+	f2_s := strings.Map(repl, XmlFault)
+	if f1_s != f2_s {
+		t.Errorf("fatal != constant\n%s\n!=\n%s", f1_s, f2_s)
+	}
+
+	_, _, f2, err := Unmarshal(buf)
+	if err != nil {
+		t.Fatal("cannot unmarshal previously marshalled fault:", err)
+	}
+	if f2.String() != f.String() {
+		t.Errorf("f1=%s != f2=%s", f, f2)
 	}
 }
