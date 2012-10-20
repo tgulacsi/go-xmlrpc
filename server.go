@@ -1,10 +1,15 @@
 package xmlrpc
 
 import (
+	// "bufio"
 	"io"
+	"log"
+	"net/http"
 	"net/rpc"
 	"reflect"
 )
+
+var DefaultXMLRPCPath = "/xmlrpc"
 
 // xmlrpc
 type serverCodec struct {
@@ -66,4 +71,53 @@ func (c *serverCodec) ReadRequestBody(dst interface{}) (err error) {
 
 func (c *serverCodec) Close() error {
 	return c.conn.Close()
+}
+
+type XmlRpcServer struct {
+	rpc.Server
+}
+
+// ServeConn runs the XML-RPC server on a single connection.
+// ServeConn blocks, serving the connection until the client hangs up.
+// The caller typically invokes ServeConn in a go statement.
+func ServeConn(conn io.ReadWriteCloser) {
+	rpc.ServeCodec(NewServerCodec(conn))
+}
+
+// ServeConn runs the server on a single connection.
+// ServeConn blocks, serving the connection until the client hangs up.
+// The caller typically invokes ServeConn in a go statement.
+// ServeConn uses the gob wire format (see package gob) on the
+// connection.  To use an alternate codec, use ServeCodec.
+func (server *XmlRpcServer) ServeConn(conn io.ReadWriteCloser) {
+	// buf := bufio.NewWriter(conn)
+	srv := &serverCodec{conn: conn}
+	server.ServeCodec(srv)
+}
+
+// ServeHTTP implements an http.Handler that answers RPC req
+func (server *XmlRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	log.Printf("connection from %s", req.RemoteAddr)
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	io.WriteString(conn, "HTTP/1.0 200 Connected go Go XML-RPC server\n\n")
+	server.ServeConn(conn)
+}
+
+var DefaultServer = NewServer()
+
+func NewServer() *XmlRpcServer {
+	return &XmlRpcServer{}
+}
+
+// HandleHTTP registers an HTTP handler for RPC messages on rpcPath,
+// and a debugging handler on debugPath.
+// It is still necessary to invoke http.Serve(), typically in a go statement.
+func (server *XmlRpcServer) HandleHTTP(rpcPath string) {
+	log.Printf("rpcPath=%s", rpcPath)
+	http.Handle(rpcPath, server)
+	// http.Handle(debugPath, debugHTTP{server})
 }

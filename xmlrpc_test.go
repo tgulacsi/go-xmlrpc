@@ -2,7 +2,11 @@ package xmlrpc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	// "net/rpc"
 	"reflect"
 	"strings"
 	"testing"
@@ -134,4 +138,52 @@ func TestFault(t *testing.T) {
 	if f2.String() != f.String() {
 		t.Errorf("f1=%s != f2=%s", f, f2)
 	}
+}
+
+type Args struct {
+	A, B int
+}
+
+type Quotient struct {
+	Quo, Rem int
+}
+
+type Arith int
+
+func (t *Arith) Multiply(args *Args, reply *int) error {
+	*reply = args.A * args.B
+	return nil
+}
+
+func (t *Arith) Divide(args *Args, quo *Quotient) error {
+	if args.B == 0 {
+		return errors.New("divide by zero")
+	}
+	quo.Quo = args.A / args.B
+	quo.Rem = args.A % args.B
+	return nil
+}
+func TestClientServer(t *testing.T) {
+	arith := new(Arith)
+	server := NewServer()
+	server.Register(arith)
+	server.HandleHTTP(DefaultXMLRPCPath)
+	l, e := net.Listen("tcp", ":1234")
+	if e != nil {
+		t.Fatal("listen error:", e)
+	}
+	go http.Serve(l, nil)
+
+	client, err := DialHTTP("tcp", "localhost:1234")
+	if err != nil {
+		t.Fatal("dialing:", err)
+	}
+	// Synchronous call
+	args := &Args{7, 8}
+	var reply int
+	err = client.Call("Arith.Multiply", args, &reply)
+	if err != nil {
+		t.Fatal("arith error:", err)
+	}
+	t.Logf("Arith: %d*%d=%d", args.A, args.B, reply)
 }

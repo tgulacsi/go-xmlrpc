@@ -237,7 +237,7 @@ Reading:
 					break Reading
 				}
 			default:
-				log.Printf("discarded %s %T", t, t)
+				// log.Printf("discarded %s %T", t, t)
 			}
 		}
 		if t, e = st.p.Token(); e != nil {
@@ -428,6 +428,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 
 	switch k {
 	case reflect.Invalid:
+		log.Printf("v=%#v t=%v k=%s", v, t, k)
 		return Unsupported
 	case reflect.Bool:
 		_, err = fmt.Fprintf(w, "<boolean>%v</boolean>", v)
@@ -443,6 +444,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = fmt.Fprintf(w, "%v", v)
 		return err
 	case reflect.Uintptr:
+		log.Printf("v=%#v t=%v k=%s", v, t, k)
 		return Unsupported
 	case reflect.Float32, reflect.Float64:
 		if typ {
@@ -452,6 +454,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = fmt.Fprintf(w, "%v", v)
 		return err
 	case reflect.Complex64, reflect.Complex128:
+		log.Printf("v=%#v t=%v k=%s", v, t, k)
 		return Unsupported
 	case reflect.Array, reflect.Slice:
 		if _, err = io.WriteString(w, "<array><data>\n"); err != nil {
@@ -473,8 +476,10 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			return
 		}
 	case reflect.Chan:
+		log.Printf("v=%#v t=%v k=%s", v, t, k)
 		return Unsupported
 	case reflect.Func:
+		log.Printf("v=%#v t=%v k=%s", v, t, k)
 		return Unsupported
 	case reflect.Interface:
 		return WriteXml(w, r.Elem(), typ)
@@ -502,7 +507,8 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = io.WriteString(w, "</struct>")
 		return
 	case reflect.Ptr:
-		return Unsupported
+		log.Printf("v=%#v t=%v k=%s", v, t, k)
+		return WriteXml(w, reflect.Indirect(r), typ)
 	case reflect.String:
 		if typ {
 			_, err = fmt.Fprintf(w, "<string>%v</string>", xmlEscape(v.(string)))
