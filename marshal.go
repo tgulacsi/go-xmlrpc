@@ -106,7 +106,7 @@ var (
 func (st *state) parseValue() (nv interface{}, e error) {
 	var se xml.StartElement
 	if se, e = st.getStart(""); e != nil {
-		if e == notStartElement {
+		if ErrEq(e, notStartElement) {
 			e = nil
 		}
 		return
@@ -155,7 +155,7 @@ func (st *state) parseValue() (nv interface{}, e error) {
 		for {
 			// log.Printf("struct searching for member")
 			if se, e = st.getStart("member"); e != nil {
-				if e == notStartElement {
+				if ErrEq(e, notStartElement) {
 					e = st.checkLast("struct")
 					break
 				}
@@ -190,7 +190,7 @@ func (st *state) parseValue() (nv interface{}, e error) {
 		for {
 			if se, e = st.getStart("value"); e != nil {
 				// log.Printf("array parsing ends with %s", e)
-				if e == notStartElement {
+				if ErrEq(e, notStartElement) {
 					e = nil //st.checkLast("data")
 					break
 				}
@@ -255,14 +255,14 @@ Reading:
 		if !ok {
 			// log.Printf("required startelement(%s), found %s %T", name, t, t)
 			st.last = &t
-			e = notStartElement
+			e = Errorf2(notStartElement, "required startelement(%s), found %s %T", name, t, t)
 			return
 		}
 		switch typ {
 		case tokStart:
 			if name != "" && se.Name.Local != name {
 				// log.Printf("required <%s>, found <%s>", name, se.Name.Local)
-				e = nameMismatch
+				e = Errorf2(nameMismatch, "required <%s>, found <%s>", name, se.Name.Local)
 				return
 			}
 		default:
@@ -277,12 +277,12 @@ Reading:
 		if !ok {
 			log.Printf("required endelement(%s), found %s %T", name, t, t)
 			st.last = &t
-			e = notEndElement
+			e = Errorf2(notEndElement, "required endelement(%s), found %s %T", name, t, t)
 			return
 		}
 		if name != "" && ee.Name.Local != name {
-			log.Printf("required </%s>, found </%s>", name, ee.Name.Local)
-			e = nameMismatch
+			// log.Printf("required </%s>, found </%s>", name, ee.Name.Local)
+			e = Errorf2(nameMismatch, "required </%s>, found </%s>", name, ee.Name.Local)
 			return
 		}
 	}
@@ -293,6 +293,7 @@ Reading:
 func (st *state) getStart(name string) (se xml.StartElement, e error) {
 	var t xml.Token
 	t, _, e = st.token(tokStart, name)
+	se, _ = t.(xml.StartElement)
 	if e != nil {
 		return
 	}
@@ -407,6 +408,9 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	logger.SetPrefix("WriteXml")
 
+	if rv, ok := v.(reflect.Value); ok {
+		v = reflect.ValueOf(rv)
+	}
 	if fp, ok := getFault(v); ok {
 		_, err = fp.WriteXml(w)
 		return
@@ -647,7 +651,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	p := xml.NewDecoder(r)
 	st := newParser(p)
 	typ := "methodResponse"
-	if _, e = st.getStart(typ); e == nameMismatch { // methodResponse or methodCall
+	if _, e = st.getStart(typ); ErrEq(e, nameMismatch) { // methodResponse or methodCall
 		typ = "methodCall"
 		if name, e = st.getText("methodName"); e != nil {
 			return
@@ -656,7 +660,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	var se xml.StartElement
 	if se, e = st.getStart("params"); e != nil {
 		log.Printf("not params, but %s (%s)", se.Name.Local, e)
-		if e == nameMismatch && se.Name.Local == "fault" {
+		if ErrEq(e, nameMismatch) && se.Name.Local == "fault" {
 			var v interface{}
 			if v, e = st.parseValue(); e != nil {
 				return
@@ -696,7 +700,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	var v interface{}
 	for {
 		if _, e = st.getStart("param"); e != nil {
-			if e == notStartElement {
+			if ErrEq(e, notStartElement) {
 				e = nil
 				break
 			}

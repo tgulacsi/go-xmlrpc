@@ -131,9 +131,10 @@ func TestFault(t *testing.T) {
 		t.Errorf("fatal != constant\n%s\n!=\n%s", f1_s, f2_s)
 	}
 
-	_, _, f2, err := Unmarshal(buf)
+	_, _, f2, err := Unmarshal(bytes.NewBuffer(buf.Bytes()))
 	if err != nil {
-		t.Fatal("cannot unmarshal previously marshalled fault:", err)
+		t.Fatalf("cannot unmarshal previously marshalled fault (\n%s\n):%s",
+			buf, err)
 	}
 	if f2.String() != f.String() {
 		t.Errorf("f1=%s != f2=%s", f, f2)
