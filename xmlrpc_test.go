@@ -165,6 +165,7 @@ func (t *Arith) Divide(args *Args, quo *Quotient) error {
 	return nil
 }
 func TestClientServer(t *testing.T) {
+	debugServer, debugClient = true, true
 	arith := new(Arith)
 	server := NewServer()
 	server.Register(arith)

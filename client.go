@@ -2,13 +2,18 @@ package xmlrpc
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/rpc"
 	"strings"
 )
+
+var debugClient bool = false
 
 // xmlrpc
 type clientCodec struct {
@@ -29,8 +34,18 @@ func (c *clientCodec) WriteRequest(req *rpc.Request, param interface{}) error {
 	)
 	if arr, ok = param.([]interface{}); !ok {
 		arr = []interface{}{param}
+		log.Printf("param=%+v %T", param, param)
 	}
-	err = Marshal(c.conn, req.ServiceMethod, arr...)
+	var w io.Writer = c.conn
+	var buf *bytes.Buffer
+	if debugClient {
+		buf = bytes.NewBuffer(nil)
+		w = io.MultiWriter(c.conn, buf)
+	}
+	err = Marshal(w, req.ServiceMethod, arr...)
+	if debugClient {
+		log.Printf("marshalled request %+v with error %s:\n%s", arr, err, buf)
+	}
 	return err
 }
 
@@ -49,7 +64,7 @@ func (c *clientCodec) ReadResponseBody(dst interface{}) error {
 		return nil
 	}
 	if err = FillStruct(&dst, data); err != nil {
-		return err
+		return fmt.Errorf("error reading %+v into %+v: %s", data, dst, err)
 	}
 	return nil
 }

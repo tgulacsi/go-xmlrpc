@@ -407,9 +407,14 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 
 func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 	logger.SetPrefix("WriteXml")
-
-	if rv, ok := v.(reflect.Value); ok {
-		v = reflect.ValueOf(rv)
+	var (
+		r  reflect.Value
+		ok bool
+	)
+	if r, ok = v.(reflect.Value); !ok {
+		r = reflect.ValueOf(v)
+	} else {
+		v = r.Interface()
 	}
 	if fp, ok := getFault(v); ok {
 		_, err = fp.WriteXml(w)
@@ -426,14 +431,12 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = taggedWriteString(w, "dateTime.iso8601", tim.Format(FullXmlRpcTime))
 		return
 	}
-	r := reflect.ValueOf(v)
 	t := r.Type()
 	k := t.Kind()
 
 	switch k {
-	case reflect.Invalid:
-		log.Printf("v=%#v t=%v k=%s", v, t, k)
-		return Unsupported
+	case reflect.Invalid, reflect.Uintptr, reflect.Complex64, reflect.Complex128, reflect.Chan, reflect.Func:
+		return Errorf2(Unsupported, "v=%#v t=%v k=%s", v, t, k)
 	case reflect.Bool:
 		_, err = fmt.Fprintf(w, "<boolean>%v</boolean>", v)
 		return err
@@ -447,9 +450,6 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		}
 		_, err = fmt.Fprintf(w, "%v", v)
 		return err
-	case reflect.Uintptr:
-		log.Printf("v=%#v t=%v k=%s", v, t, k)
-		return Unsupported
 	case reflect.Float32, reflect.Float64:
 		if typ {
 			_, err = fmt.Fprintf(w, "<double>%v</double>", v)
@@ -457,9 +457,6 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		}
 		_, err = fmt.Fprintf(w, "%v", v)
 		return err
-	case reflect.Complex64, reflect.Complex128:
-		log.Printf("v=%#v t=%v k=%s", v, t, k)
-		return Unsupported
 	case reflect.Array, reflect.Slice:
 		if _, err = io.WriteString(w, "<array><data>\n"); err != nil {
 			return
@@ -479,12 +476,6 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		if _, err = io.WriteString(w, "</data></array>\n"); err != nil {
 			return
 		}
-	case reflect.Chan:
-		log.Printf("v=%#v t=%v k=%s", v, t, k)
-		return Unsupported
-	case reflect.Func:
-		log.Printf("v=%#v t=%v k=%s", v, t, k)
-		return Unsupported
 	case reflect.Interface:
 		return WriteXml(w, r.Elem(), typ)
 	case reflect.Map:
@@ -511,7 +502,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = io.WriteString(w, "</struct>")
 		return
 	case reflect.Ptr:
-		log.Printf("v=%#v t=%v k=%s", v, t, k)
+		log.Printf("indirecting pointer v=%#v t=%v k=%s", v, t, k)
 		return WriteXml(w, reflect.Indirect(r), typ)
 	case reflect.String:
 		if typ {
@@ -521,6 +512,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = io.WriteString(w, xmlEscape(v.(string)))
 		return
 	case reflect.Struct:
+		log.Printf("Struct %+v", v)
 		if _, err = io.WriteString(w, "<struct>"); err != nil {
 			return
 		}
@@ -659,7 +651,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	}
 	var se xml.StartElement
 	if se, e = st.getStart("params"); e != nil {
-		log.Printf("not params, but %s (%s)", se.Name.Local, e)
+		// log.Printf("not params, but %s (%s)", se.Name.Local, e)
 		if ErrEq(e, nameMismatch) && se.Name.Local == "fault" {
 			var v interface{}
 			if v, e = st.parseValue(); e != nil {

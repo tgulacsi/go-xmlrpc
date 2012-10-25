@@ -2,6 +2,8 @@ package xmlrpc
 
 import (
 	// "bufio"
+	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 )
 
 var DefaultXMLRPCPath = "/xmlrpc"
+var debugServer bool = false
 
 // xmlrpc
 type serverCodec struct {
@@ -35,7 +38,17 @@ func (c *serverCodec) WriteResponse(req *rpc.Response, param interface{}) error 
 		if !ok {
 			arr = []interface{}{param}
 		}
-		err = Marshal(c.conn, req.ServiceMethod, arr...)
+		var w io.Writer = c.conn
+		var buf *bytes.Buffer
+		if debugServer {
+			buf = bytes.NewBuffer(nil)
+			w = io.MultiWriter(c.conn, buf)
+		}
+		err = Marshal(w, req.ServiceMethod, arr...)
+		if debugServer {
+			log.Printf("marshalled response %+v with error %s:\n%s",
+				arr, err, buf)
+		}
 	}
 	return err
 }
@@ -63,7 +76,7 @@ func (c *serverCodec) ReadRequestBody(dst interface{}) (err error) {
 		}
 	}
 	if err = FillStruct(&dst, src); err != nil {
-		return err
+		return fmt.Errorf("error reading %+v into %+v: %s", src, dst, err)
 	}
 
 	return nil
