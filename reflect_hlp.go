@@ -12,7 +12,7 @@ func FillStruct(dst interface{}, src interface{}) (err error) {
 	t := reflect.TypeOf(dst)
 	k := t.Kind()
 	for k == reflect.Ptr {
-		dst2r := reflect.Indirect(reflect.ValueOf(dst))
+		dst2r := reflect.ValueOf(dst).Elem()
 		k = dst2r.Kind()
 		if k == reflect.Struct || k != reflect.Ptr {
 			break

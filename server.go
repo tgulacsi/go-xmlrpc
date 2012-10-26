@@ -55,6 +55,7 @@ func (c *serverCodec) WriteResponse(req *rpc.Response, param interface{}) error 
 
 func (c *serverCodec) ReadRequestHeader(r *rpc.Request) (err error) {
 	r.ServiceMethod, c.params, c.fault, err = Unmarshal(c.conn)
+	log.Printf("RRH %s %+v %s", r.ServiceMethod, c.params, err)
 	if err != nil {
 		return err
 	}

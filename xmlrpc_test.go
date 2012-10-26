@@ -185,7 +185,7 @@ func TestClientServer(t *testing.T) {
 	// var reply int
 	// err = client.Call("Arith.Multiply", args, &reply)
 	reply := new(Quotient)
-	err = client.Call("Arith.Divide", args, &reply)
+	err = client.Call("Arith.Divide", args, reply)
 	if err != nil {
 		t.Fatal("arith error:", err)
 	}

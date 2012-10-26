@@ -66,7 +66,7 @@ func (c *clientCodec) ReadResponseBody(dst interface{}) error {
 	if err = FillStruct(dst, data); err != nil {
 		return fmt.Errorf("error reading %+v into %+v: %s", data, dst, err)
 	}
-	log.Printf("got response back: %+v", dst)
+	log.Printf("got response back: %+v (%s) %T", dst, dst, dst)
 	if ptr, ok := dst.(*interface{}); ok {
 		log.Printf("ptr=%+v", ptr)
 		log.Printf("*ptr=%+v", *ptr)
