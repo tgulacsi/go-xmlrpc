@@ -30,7 +30,7 @@ func (c *serverCodec) WriteResponse(req *rpc.Response, param interface{}) error 
 	var (
 		err error
 	)
-	fault, ok := param.(*Fault)
+	fault, ok := getFault(param)
 	if ok {
 		err = Marshal(c.conn, "", fault)
 	} else {
@@ -75,7 +75,8 @@ func (c *serverCodec) ReadRequestBody(dst interface{}) (err error) {
 			src = c.params[0]
 		}
 	}
-	if err = FillStruct(&dst, src); err != nil {
+	log.Printf("RRB got src=%+v, dst=%+v", src, dst)
+	if err = FillStruct(dst, src); err != nil {
 		return fmt.Errorf("error reading %+v into %+v: %s", src, dst, err)
 	}
 

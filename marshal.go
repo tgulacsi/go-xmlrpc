@@ -132,7 +132,9 @@ func (st *state) parseValue() (nv interface{}, e error) {
 		case "string":
 			nv = vn.Body
 		case "int", "i4":
-			nv, e = strconv.ParseInt(vn.Body, 10, 64)
+			var i64 int64
+			i64, e = strconv.ParseInt(vn.Body, 10, 32)
+			nv = int(i64)
 		case "double":
 			nv, e = strconv.ParseFloat(vn.Body, 64)
 		case "dateTime.iso8601":
@@ -411,6 +413,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		r  reflect.Value
 		ok bool
 	)
+	// go back from reflect.Value, if needed.
 	if r, ok = v.(reflect.Value); !ok {
 		r = reflect.ValueOf(v)
 	} else {
@@ -633,6 +636,10 @@ func getFault(v interface{}) (*Fault, bool) {
 				// log.Printf("  yes")
 				return f, true
 			}
+		} else {
+			if e, ok := v.(error); ok {
+				return &Fault{Code: -1, Message: e.Error()}, true
+			}
 		}
 	}
 	// log.Printf("  no")
@@ -667,7 +674,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 					e = fmt.Errorf("no faultCode in fault: %v", fmap)
 					return
 				}
-				fcode, ok := code.(int64)
+				fcode, ok := code.(int)
 				if !ok {
 					e = fmt.Errorf("faultCode not int? %v", code)
 					return

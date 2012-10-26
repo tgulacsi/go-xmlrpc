@@ -182,10 +182,12 @@ func TestClientServer(t *testing.T) {
 	}
 	// Synchronous call
 	args := &Args{7, 8}
-	var reply int
-	err = client.Call("Arith.Multiply", args, &reply)
+	// var reply int
+	// err = client.Call("Arith.Multiply", args, &reply)
+	reply := new(Quotient)
+	err = client.Call("Arith.Divide", args, &reply)
 	if err != nil {
 		t.Fatal("arith error:", err)
 	}
-	t.Logf("Arith: %d*%d=%d", args.A, args.B, reply)
+	t.Logf("Arith: %d*%d=%+v", args.A, args.B, reply)
 }
