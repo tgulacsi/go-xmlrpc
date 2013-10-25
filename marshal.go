@@ -678,7 +678,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 				return
 			}
 			fmap, ok := v.(map[string]interface{})
-            if !ok {
+			if !ok {
 				e = fmt.Errorf("fault not fault: %+v", v)
 				return
 			}

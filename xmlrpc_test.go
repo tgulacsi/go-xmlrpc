@@ -169,7 +169,7 @@ func TestClientServer(t *testing.T) {
 	arith := new(Arith)
 	server := NewServer()
 	server.Register(arith)
-	server.HandleHTTP(DefaultXMLRPCPath)
+	server.SetHTTPHandler(DefaultXMLRPCPath)
 	l, e := net.Listen("tcp", ":1234")
 	if e != nil {
 		t.Fatal("listen error:", e)

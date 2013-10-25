@@ -132,10 +132,10 @@ func NewServer() *XMLRpcServer {
 	return &XMLRpcServer{}
 }
 
-// HandleHTTP registers an HTTP handler for RPC messages on rpcPath,
+// SetHTTPHandler registers an HTTP handler for RPC messages on rpcPath,
 // and a debugging handler on debugPath.
 // It is still necessary to invoke http.Serve(), typically in a go statement.
-func (server *XMLRpcServer) HandleHTTP(rpcPath string) {
+func (server *XMLRpcServer) SetHTTPHandler(rpcPath string) {
 	log.Printf("rpcPath=%s", rpcPath)
 	http.Handle(rpcPath, server)
 	// http.Handle(debugPath, debugHTTP{server})
