@@ -19,23 +19,26 @@ import (
 var logger = log.New(os.Stderr, "xmlrpc", log.LstdFlags)
 
 const (
-	FullXmlRpcTime  = "2006-01-02T15:04:05-07:00"
-	LocalXmlRpcTime = "2006-01-02T15:04:05"
-	DenseXmlRpcTime = "20060102T15:04:05"
+	// FullXMLRpcTime is the format of a full XML-RPC time
+	FullXMLRpcTime = "2006-01-02T15:04:05-07:00"
+	// LocalXMLRpcTime is the XML-RPC time without timezone
+	LocalXMLRpcTime = "2006-01-02T15:04:05"
+	// DenseXMLRpcTime is a dense-formatted local time
+	DenseXMLRpcTime = "20060102T15:04:05"
 )
 
-// sets new logger for this package, returns old logger
+// SetLogger sets a new logger for this package, returns old logger
 func SetLogger(lgr *log.Logger) *log.Logger {
 	old := logger
 	logger = lgr
 	return old
 }
 
+// Unsupported is the error of "Unsupported type"
 var Unsupported = errors.New("Unsupported type")
 var levelDecremented = errors.New("level decremented")
 
-// type Array []interface{}
-// type Struct map[string]interface{}
+// Fault is the struct for the fault response
 type Fault struct {
 	Code    int
 	Message string
@@ -47,7 +50,9 @@ func (f Fault) String() string {
 func (f Fault) Error() string {
 	return f.String()
 }
-func (f Fault) WriteXml(w io.Writer) (int, error) {
+
+// WriteXML writes the XML representation of the fault into the Writer
+func (f Fault) WriteXML(w io.Writer) (int, error) {
 	return fmt.Fprintf(w, `<fault><value><struct>
 			<member><name>faultCode</name><value><int>%d</int></value></member>
 			<member><name>faultString</name><value><string>%s</string></value></member>
@@ -138,7 +143,7 @@ func (st *state) parseValue() (nv interface{}, e error) {
 		case "double":
 			nv, e = strconv.ParseFloat(vn.Body, 64)
 		case "dateTime.iso8601":
-			for _, format := range []string{FullXmlRpcTime, LocalXmlRpcTime, DenseXmlRpcTime} {
+			for _, format := range []string{FullXMLRpcTime, LocalXMLRpcTime, DenseXMLRpcTime} {
 				nv, e = time.Parse(format, vn.Body)
 				// log.Print("txt=", vn.Body, " t=", t, " fmt=", format, " e=", e)
 				if e == nil {
@@ -314,7 +319,7 @@ func (st *state) checkLast(name string) (e error) {
 	return
 }
 
-func to_xml(v interface{}, typ bool) (s string) {
+func toXML(v interface{}, typ bool) (s string) {
 	r := reflect.ValueOf(v)
 	t := r.Type()
 	k := t.Kind()
@@ -349,7 +354,7 @@ func to_xml(v interface{}, typ bool) (s string) {
 		s = "<array><data>"
 		for n := 0; n < r.Len(); n++ {
 			s += "<value>"
-			s += to_xml(r.Index(n).Interface(), typ)
+			s += toXML(r.Index(n).Interface(), typ)
 			s += "</value>"
 		}
 		s += "</data></array>"
@@ -359,13 +364,13 @@ func to_xml(v interface{}, typ bool) (s string) {
 	case reflect.Func:
 		panic("Unsupported type")
 	case reflect.Interface:
-		return to_xml(r.Elem(), typ)
+		return toXML(r.Elem(), typ)
 	case reflect.Map:
 		s = "<struct>"
 		for _, key := range r.MapKeys() {
 			s += "<member>"
 			s += "<name>" + xmlEscape(key.Interface().(string)) + "</name>"
-			s += "<value>" + to_xml(r.MapIndex(key).Interface(), typ) + "</value>"
+			s += "<value>" + toXML(r.MapIndex(key).Interface(), typ) + "</value>"
 			s += "</member>"
 		}
 		return s + "</struct>"
@@ -381,16 +386,18 @@ func to_xml(v interface{}, typ bool) (s string) {
 		for n := 0; n < r.NumField(); n++ {
 			s += "<member>"
 			s += "<name>" + t.Field(n).Name + "</name>"
-			s += "<value>" + to_xml(r.FieldByIndex([]int{n}).Interface(), true) + "</value>"
+			s += "<value>" + toXML(r.FieldByIndex([]int{n}).Interface(), true) + "</value>"
 			s += "</member>"
 		}
 		return s + "</struct>"
 	case reflect.UnsafePointer:
-		return to_xml(r.Elem(), typ)
+		return toXML(r.Elem(), typ)
 	}
 	return
 }
 
+// Call callse the method with "name" at the url location, with the given args
+// returns the result, a fault pointer, and an error for communication errors
 func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	req := bytes.NewBuffer(nil)
 	e := Marshal(req, name, args...)
@@ -407,8 +414,9 @@ func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	return v, f, e
 }
 
-func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
-	logger.SetPrefix("WriteXml")
+// WriteXML writes v, typed if typ is true, into w Writer
+func WriteXML(w io.Writer, v interface{}, typ bool) (err error) {
+	logger.SetPrefix("WriteXML")
 	var (
 		r  reflect.Value
 		ok bool
@@ -420,7 +428,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		v = r.Interface()
 	}
 	if fp, ok := getFault(v); ok {
-		_, err = fp.WriteXml(w)
+		_, err = fp.WriteXML(w)
 		return
 	}
 	if b, ok := v.([]byte); ok {
@@ -431,7 +439,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		return
 	}
 	if tim, ok := v.(time.Time); ok {
-		_, err = taggedWriteString(w, "dateTime.iso8601", tim.Format(FullXmlRpcTime))
+		_, err = taggedWriteString(w, "dateTime.iso8601", tim.Format(FullXMLRpcTime))
 		return
 	}
 	t := r.Type()
@@ -469,7 +477,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			if _, err = io.WriteString(w, "  <value>"); err != nil {
 				return
 			}
-			if err = WriteXml(w, r.Index(i).Interface(), typ); err != nil {
+			if err = WriteXML(w, r.Index(i).Interface(), typ); err != nil {
 				return
 			}
 			if _, err = io.WriteString(w, "</value>\n"); err != nil {
@@ -480,7 +488,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			return
 		}
 	case reflect.Interface:
-		return WriteXml(w, r.Elem(), typ)
+		return WriteXML(w, r.Elem(), typ)
 	case reflect.Map:
 		if _, err = io.WriteString(w, "<struct>\n"); err != nil {
 			return
@@ -495,7 +503,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			if _, err = io.WriteString(w, "</name><value>"); err != nil {
 				return
 			}
-			if err = WriteXml(w, r.MapIndex(key).Interface(), typ); err != nil {
+			if err = WriteXML(w, r.MapIndex(key).Interface(), typ); err != nil {
 				return
 			}
 			if _, err = io.WriteString(w, "</value></member>\n"); err != nil {
@@ -506,7 +514,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		return
 	case reflect.Ptr:
 		log.Printf("indirecting pointer v=%#v t=%v k=%s", v, t, k)
-		return WriteXml(w, reflect.Indirect(r), typ)
+		return WriteXML(w, reflect.Indirect(r), typ)
 	case reflect.String:
 		if typ {
 			_, err = fmt.Fprintf(w, "<string>%v</string>", xmlEscape(v.(string)))
@@ -534,7 +542,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 			if _, err = io.WriteString(w, "</name><value>"); err != nil {
 				return
 			}
-			if err = WriteXml(w, r.Field(i).Interface(), true); err != nil {
+			if err = WriteXML(w, r.Field(i).Interface(), true); err != nil {
 				return
 			}
 			if _, err = io.WriteString(w, "</value></member>"); err != nil {
@@ -544,7 +552,7 @@ func WriteXml(w io.Writer, v interface{}, typ bool) (err error) {
 		_, err = io.WriteString(w, "</struct>")
 		return
 	case reflect.UnsafePointer:
-		return WriteXml(w, r.Elem(), typ)
+		return WriteXML(w, r.Elem(), typ)
 	}
 	return
 }
@@ -576,6 +584,8 @@ func taggedWriteString(w io.Writer, tag, inner string) (n int, err error) {
 	return
 }
 
+// Marshal marshals the named thing (methodResponse if name == "", otherwise a methodCall)
+// into the w Writer
 func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 	if name == "" {
 		if _, err = io.WriteString(w, "<methodResponse>"); err != nil {
@@ -585,7 +595,7 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 			fp, ok := getFault(args[0])
 			// log.Printf("fault (%+v)? %s", args[0], ok)
 			if ok {
-				_, err = fp.WriteXml(w)
+				_, err = fp.WriteXML(w)
 				if err == nil {
 					_, err = io.WriteString(w, "\n</methodResponse>")
 				}
@@ -610,7 +620,7 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 		if _, err = io.WriteString(w, "  <param><value>"); err != nil {
 			return
 		}
-		if err = WriteXml(w, arg, true); err != nil {
+		if err = WriteXML(w, arg, true); err != nil {
 			return
 		}
 		if _, err = io.WriteString(w, "</value></param>\n"); err != nil {
@@ -630,22 +640,25 @@ func getFault(v interface{}) (*Fault, bool) {
 	if f, ok := v.(Fault); ok {
 		// log.Printf("  yes")
 		return &f, true
+	}
+	if f, ok := v.(*Fault); ok {
+		if f != nil {
+			// log.Printf("  yes")
+			return f, true
+		}
 	} else {
-		if f, ok := v.(*Fault); ok {
-			if f != nil {
-				// log.Printf("  yes")
-				return f, true
-			}
-		} else {
-			if e, ok := v.(error); ok {
-				return &Fault{Code: -1, Message: e.Error()}, true
-			}
+		if e, ok := v.(error); ok {
+			return &Fault{Code: -1, Message: e.Error()}, true
 		}
 	}
 	// log.Printf("  no")
 	return nil, false
 }
 
+// Unmarshal unmarshals the thing (methodResponse, methodCall or fault),
+// returns the name of the method call in the first return argument;
+// the params of the call or the response
+// or the Fault if this is a Fault
 func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e error) {
 	p := xml.NewDecoder(r)
 	st := newParser(p)
@@ -664,32 +677,31 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 			if v, e = st.parseValue(); e != nil {
 				return
 			}
-			if fmap, ok := v.(map[string]interface{}); !ok {
+			fmap, ok := v.(map[string]interface{})
+            if !ok {
 				e = fmt.Errorf("fault not fault: %+v", v)
 				return
-			} else {
-				fault = &Fault{Code: -1, Message: ""}
-				code, ok := fmap["faultCode"]
-				if !ok {
-					e = fmt.Errorf("no faultCode in fault: %v", fmap)
-					return
-				}
-				fcode, ok := code.(int)
-				if !ok {
-					e = fmt.Errorf("faultCode not int? %v", code)
-					return
-				}
-				fault.Code = int(fcode)
-				msg, ok := fmap["faultString"]
-				if !ok {
-					e = fmt.Errorf("no faultString in fault: %v", fmap)
-					return
-				}
-				if fault.Message, ok = msg.(string); !ok {
-					e = fmt.Errorf("faultString not strin? %v", msg)
-					return
-				}
-				e = nil
+			}
+			fault = &Fault{Code: -1, Message: ""}
+			code, ok := fmap["faultCode"]
+			if !ok {
+				e = fmt.Errorf("no faultCode in fault: %v", fmap)
+				return
+			}
+			fcode, ok := code.(int)
+			if !ok {
+				e = fmt.Errorf("faultCode not int? %v", code)
+				return
+			}
+			fault.Code = int(fcode)
+			msg, ok := fmap["faultString"]
+			if !ok {
+				e = fmt.Errorf("no faultString in fault: %v", fmap)
+				return
+			}
+			if fault.Message, ok = msg.(string); !ok {
+				e = fmt.Errorf("faultString not strin? %v", msg)
+				return
 			}
 			e = st.checkLast("fault")
 		}

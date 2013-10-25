@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// FillStruct fills the dst struct (must be pointer to a struct) from the src struct
 func FillStruct(dst interface{}, src interface{}) (err error) {
 	log.Printf("FillStruct(%+v, %+v)", dst, src)
 	t := reflect.TypeOf(dst)

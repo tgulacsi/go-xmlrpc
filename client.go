@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-var debugClient bool = false
+var debugClient = false
 
 // xmlrpc
 type clientCodec struct {
@@ -36,7 +36,7 @@ func (c *clientCodec) WriteRequest(req *rpc.Request, param interface{}) error {
 		arr = []interface{}{param}
 		log.Printf("param=%+v %T", param, param)
 	}
-	var w io.Writer = c.conn
+	var w = io.Writer(c.conn)
 	var buf *bytes.Buffer
 	if debugClient {
 		buf = bytes.NewBuffer(nil)

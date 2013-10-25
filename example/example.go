@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/mattn/go-xmlrpc"
 	"fmt"
+	"github.com/mattn/go-xmlrpc"
 	"log"
 )
 

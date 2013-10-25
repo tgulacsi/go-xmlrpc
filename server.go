@@ -11,8 +11,9 @@ import (
 	"reflect"
 )
 
+// DefaultXMLRPCPath is the path for the default handlers
 var DefaultXMLRPCPath = "/xmlrpc"
-var debugServer bool = false
+var debugServer = false
 
 // xmlrpc
 type serverCodec struct {
@@ -38,7 +39,7 @@ func (c *serverCodec) WriteResponse(req *rpc.Response, param interface{}) error 
 		if !ok {
 			arr = []interface{}{param}
 		}
-		var w io.Writer = c.conn
+		var w = io.Writer(c.conn)
 		var buf *bytes.Buffer
 		if debugServer {
 			buf = bytes.NewBuffer(nil)
@@ -88,7 +89,8 @@ func (c *serverCodec) Close() error {
 	return c.conn.Close()
 }
 
-type XmlRpcServer struct {
+// XMLRpcServer is the server struct
+type XMLRpcServer struct {
 	rpc.Server
 }
 
@@ -104,14 +106,14 @@ func ServeConn(conn io.ReadWriteCloser) {
 // The caller typically invokes ServeConn in a go statement.
 // ServeConn uses the gob wire format (see package gob) on the
 // connection.  To use an alternate codec, use ServeCodec.
-func (server *XmlRpcServer) ServeConn(conn io.ReadWriteCloser) {
+func (server *XMLRpcServer) ServeConn(conn io.ReadWriteCloser) {
 	// buf := bufio.NewWriter(conn)
 	srv := &serverCodec{conn: conn}
 	server.ServeCodec(srv)
 }
 
 // ServeHTTP implements an http.Handler that answers RPC req
-func (server *XmlRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (server *XMLRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	log.Printf("connection from %s", req.RemoteAddr)
 	conn, _, err := w.(http.Hijacker).Hijack()
 	if err != nil {
@@ -122,16 +124,18 @@ func (server *XmlRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	server.ServeConn(conn)
 }
 
+// DefaultServer is the default server
 var DefaultServer = NewServer()
 
-func NewServer() *XmlRpcServer {
-	return &XmlRpcServer{}
+// NewServer returns a new XML-RPC server
+func NewServer() *XMLRpcServer {
+	return &XMLRpcServer{}
 }
 
 // HandleHTTP registers an HTTP handler for RPC messages on rpcPath,
 // and a debugging handler on debugPath.
 // It is still necessary to invoke http.Serve(), typically in a go statement.
-func (server *XmlRpcServer) HandleHTTP(rpcPath string) {
+func (server *XMLRpcServer) HandleHTTP(rpcPath string) {
 	log.Printf("rpcPath=%s", rpcPath)
 	http.Handle(rpcPath, server)
 	// http.Handle(debugPath, debugHTTP{server})

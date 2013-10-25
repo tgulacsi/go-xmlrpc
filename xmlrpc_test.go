@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-const XmlCallString = `<?xml version="1.0"?>
+const xmlCallString = `<?xml version="1.0"?>
 <methodCall>
    <methodName>examples.getStateName</methodName>
    <params>
@@ -26,7 +26,7 @@ const XmlCallString = `<?xml version="1.0"?>
       </params>
    </methodCall>`
 
-const XmlResponse = `<?xml version="1.0"?>
+const xmlResponse = `<?xml version="1.0"?>
 <methodResponse>
    <params>
       <param><value><dateTime.iso8601>19980717T14:08:55</dateTime.iso8601></value></param>
@@ -40,7 +40,7 @@ const XmlResponse = `<?xml version="1.0"?>
       </params>
    </methodResponse>`
 
-const XmlFault = `<methodResponse>
+const xmlFault = `<methodResponse>
    <fault>
       <value>
          <struct>
@@ -57,7 +57,7 @@ const XmlFault = `<methodResponse>
       </fault>
    </methodResponse>`
 
-var XmlCallStruct = []interface{}{int(41), int(42), true,
+var xmlCallStruct = []interface{}{int(41), int(42), true,
 	"árvíztűrő tükörfúrógép", -0.333333,
 	// time.Date(1901, 2, 3, 4, 5, 6, 0, time.FixedZone("+0700", 7*3600)),
 	[]byte{1, 2, 3, 5, 7, 11, 13, 17},
@@ -68,28 +68,28 @@ var XmlCallStruct = []interface{}{int(41), int(42), true,
 }
 
 func TestMarshalCall(t *testing.T) {
-	name, c, _, err := Unmarshal(bytes.NewBufferString(XmlCallString))
+	name, c, _, err := Unmarshal(bytes.NewBufferString(xmlCallString))
 	if err != nil {
-		t.Fatal("error unmarshaling XmlCall:", err)
+		t.Fatal("error unmarshaling xmlCall:", err)
 	}
 	t.Logf("unmarshalled call[%s]: %v\n", name, c)
 }
 
 func TestUnmarshalResponse(t *testing.T) {
-	name, c, fault, err := Unmarshal(bytes.NewBufferString(XmlResponse))
+	name, c, fault, err := Unmarshal(bytes.NewBufferString(xmlResponse))
 	if err != nil {
-		t.Fatal("error unmarshaling XmlResponse:", err)
+		t.Fatal("error unmarshaling xmlResponse:", err)
 	}
 	t.Logf("unmarshalled response[%s]: %+v\n%s\n", name, c, fault)
 }
 
 func TestMarshalling(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	err := Marshal(buf, "trial", XmlCallStruct)
+	err := Marshal(buf, "trial", xmlCallStruct)
 	if err != nil {
-		t.Fatal("error marshalling XmlCallStruct:", err)
+		t.Fatal("error marshalling xmlCallStruct:", err)
 	}
-	t.Logf("marshalled %+v\n:\n%s\n", XmlCallStruct, buf.Bytes())
+	t.Logf("marshalled %+v\n:\n%s\n", xmlCallStruct, buf.Bytes())
 
 	name, c, _, err := Unmarshal(buf)
 	if err != nil {
@@ -98,14 +98,14 @@ func TestMarshalling(t *testing.T) {
 	if name != "trial" {
 		t.Error("name mismatch")
 	}
-	c_s := fmt.Sprintf("%#v", c)
+	cS := fmt.Sprintf("%#v", c)
 	// double check, because sometimes I got back array in array
-	if !(fmt.Sprintf("%#v", XmlCallStruct) == c_s ||
-		fmt.Sprintf("%#v", []interface{}{XmlCallStruct}) == c_s) {
+	if !(fmt.Sprintf("%#v", xmlCallStruct) == cS ||
+		fmt.Sprintf("%#v", []interface{}{xmlCallStruct}) == cS) {
 		t.Errorf("struct mismatch:\n%s\n!=\n%#v\n&&\n%s\n!=\n%#v\n%s ? %s\n",
-			c_s, XmlCallStruct, c_s, []interface{}{XmlCallStruct},
-			reflect.DeepEqual(c, XmlCallStruct),
-			reflect.DeepEqual(c, []interface{}{XmlCallStruct}))
+			cS, xmlCallStruct, cS, []interface{}{xmlCallStruct},
+			reflect.DeepEqual(c, xmlCallStruct),
+			reflect.DeepEqual(c, []interface{}{xmlCallStruct}))
 	}
 }
 
@@ -114,7 +114,7 @@ func TestFault(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	err := Marshal(buf, "", f)
 	if err != nil {
-		t.Fatal("error marshalling Fault: %s", err)
+		t.Fatal(fmt.Sprintf("error marshalling Fault: %s", err))
 	}
 	t.Logf("marshalled fault: %s", buf.Bytes())
 
@@ -125,10 +125,10 @@ func TestFault(t *testing.T) {
 		}
 		return r
 	}
-	f1_s := strings.Map(repl, buf.String())
-	f2_s := strings.Map(repl, XmlFault)
-	if f1_s != f2_s {
-		t.Errorf("fatal != constant\n%s\n!=\n%s", f1_s, f2_s)
+	f1S := strings.Map(repl, buf.String())
+	f2S := strings.Map(repl, xmlFault)
+	if f1S != f2S {
+		t.Errorf("fatal != constant\n%s\n!=\n%s", f1S, f2S)
 	}
 
 	_, _, f2, err := Unmarshal(bytes.NewBuffer(buf.Bytes()))
