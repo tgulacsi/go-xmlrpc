@@ -88,6 +88,10 @@ func fillStructWithSlice(dst interface{}, src []interface{}) error {
 	log.Printf("fillStructWithSlice(%+v, %+v)", dst, src)
 	v := reflect.ValueOf(dst)
 	t := v.Type()
+    if t.Kind() == reflect.Ptr {
+        v =reflect.Indirect(v)
+        t = v.Type()
+    }
 	n := t.NumField()
 	var sv reflect.Value
 	for i, val := range src {

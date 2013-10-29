@@ -28,29 +28,27 @@ func NewServerCodec(conn io.ReadWriteCloser) rpc.ServerCodec {
 }
 
 func (c *serverCodec) WriteResponse(req *rpc.Response, param interface{}) error {
+	if fault, ok := getFault(param); ok {
+		return Marshal(c.conn, "", fault)
+	}
+	arr, ok := param.([]interface{})
+	if !ok {
+		arr = []interface{}{param}
+	}
 	var (
 		err error
+		w   = io.Writer(c.conn)
 	)
-	fault, ok := getFault(param)
-	if ok {
-		err = Marshal(c.conn, "", fault)
-	} else {
-		arr, ok := param.([]interface{})
-		if !ok {
-			arr = []interface{}{param}
-		}
-		var w = io.Writer(c.conn)
-		var buf *bytes.Buffer
-		if debugServer {
-			buf = bytes.NewBuffer(nil)
-			w = io.MultiWriter(c.conn, buf)
-		}
-		err = Marshal(w, req.ServiceMethod, arr...)
-		if debugServer {
+	if debugServer {
+		buf := bytes.NewBuffer(nil)
+		w = io.MultiWriter(c.conn, buf)
+		defer func() {
 			log.Printf("marshalled response %+v with error %s:\n%s",
 				arr, err, buf)
-		}
+		}()
 	}
+	log.Printf("marshaling %s %v into %s", req.ServiceMethod, arr, w)
+	err = Marshal(w, req.ServiceMethod, arr...)
 	return err
 }
 
@@ -107,15 +105,14 @@ func ServeConn(conn io.ReadWriteCloser) {
 // ServeConn uses the gob wire format (see package gob) on the
 // connection.  To use an alternate codec, use ServeCodec.
 func (server *XMLRpcServer) ServeConn(conn io.ReadWriteCloser) {
+	io.WriteString(conn, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
 	defer func() {
 		if err := recover(); err != nil {
 			log.Printf("ServeCodec failed: %s", err)
-			io.WriteString(conn, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
 			Fault{Code: -1, Message: fmt.Sprintf("%s", err)}.WriteXML(conn)
 			conn.Close()
 		}
 	}()
-	// buf := bufio.NewWriter(conn)
 	srv := &serverCodec{conn: conn}
 	server.ServeCodec(srv)
 }
@@ -127,11 +124,19 @@ type readWriteCloser struct {
 
 type readWriter struct {
 	io.Reader
-	io.Writer
+	http.ResponseWriter
 }
 
 func (rw readWriter) Close() error {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 	return nil
+}
+
+func (rw *readWriter) Write(p []byte) (int, error) {
+	log.Printf("sending %q", p)
+	return rw.ResponseWriter.Write(p)
 }
 
 // ServeHTTP implements an http.Handler that answers RPC req
@@ -143,14 +148,18 @@ func (server *XMLRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 			log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
 			return
 		}
-		io.WriteString(conn, "HTTP/1.0 200 Connected go Go XML-RPC server\r\n\r\n")
-		io.WriteString(conn, "Content-Type: text/xml\r\n")
+		io.WriteString(conn, "HTTP/1.0 200 Connected go Go XML-RPC server\r\n")
+		io.WriteString(conn, "Content-Type: text/xml\r\n\r\n")
 		server.ServeConn(readWriteCloser{buf, conn})
 		return
 	}
 	// HTTP
+	//w.Header().Set("Connection", "close")
 	defer req.Body.Close()
-	server.ServeConn(readWriter{req.Body, w})
+	//w.Header().Set("Content-Length", "1000")
+	w.Header().Set("Content-Type", "text/xml")
+	//w.Header().Set("Transfer-Encoding", "chunked")
+	server.ServeConn(&readWriter{Reader: req.Body, ResponseWriter: w})
 	return
 }
 
