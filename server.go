@@ -112,16 +112,22 @@ func (server *XMLRpcServer) ServeConn(conn io.ReadWriteCloser) {
 	server.ServeCodec(srv)
 }
 
+type readWriteCloser struct {
+	io.ReadWriter
+	io.Closer
+}
+
 // ServeHTTP implements an http.Handler that answers RPC req
 func (server *XMLRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	log.Printf("connection from %s", req.RemoteAddr)
-	conn, _, err := w.(http.Hijacker).Hijack()
+	conn, buf, err := w.(http.Hijacker).Hijack()
 	if err != nil {
 		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
 		return
 	}
-	io.WriteString(conn, "HTTP/1.0 200 Connected go Go XML-RPC server\n\n")
-	server.ServeConn(conn)
+	io.WriteString(conn, "HTTP/1.0 200 Connected go Go XML-RPC server\r\n\r\n")
+	io.WriteString(conn, "Content-Type: text/xml\r\n")
+	server.ServeConn(readWriteCloser{buf, conn})
 }
 
 // DefaultServer is the default server

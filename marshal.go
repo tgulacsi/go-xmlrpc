@@ -671,7 +671,7 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	}
 	var se xml.StartElement
 	if se, e = st.getStart("params"); e != nil {
-		// log.Printf("not params, but %s (%s)", se.Name.Local, e)
+		log.Printf("not params, but %s (%s)", se.Name.Local, e)
 		if ErrEq(e, nameMismatch) && se.Name.Local == "fault" {
 			var v interface{}
 			if v, e = st.parseValue(); e != nil {
