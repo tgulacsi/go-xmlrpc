@@ -96,7 +96,7 @@ type XMLRpcServer struct {
 // ServeConn blocks, serving the connection until the client hangs up.
 // The caller typically invokes ServeConn in a go statement.
 func ServeConn(conn io.ReadWriteCloser) {
-	rpc.ServeCodec(NewServerCodec(conn))
+	NewServer().ServeCodec(NewServerCodec(conn))
 }
 
 // ServeConn runs the server on a single connection.
@@ -114,7 +114,7 @@ func (server *XMLRpcServer) ServeConn(conn io.ReadWriteCloser) {
 		}
 	}()
 	srv := &serverCodec{conn: conn}
-	server.ServeCodec(srv)
+	server.ServeRequest(srv)
 }
 
 type readWriteCloser struct {
@@ -135,7 +135,7 @@ func (rw readWriter) Close() error {
 }
 
 func (rw *readWriter) Write(p []byte) (int, error) {
-	log.Printf("sending %q", p)
+	//log.Printf("sending %q", p)
 	return rw.ResponseWriter.Write(p)
 }
 
@@ -154,11 +154,8 @@ func (server *XMLRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	// HTTP
-	//w.Header().Set("Connection", "close")
 	defer req.Body.Close()
-	//w.Header().Set("Content-Length", "1000")
 	w.Header().Set("Content-Type", "text/xml")
-	//w.Header().Set("Transfer-Encoding", "chunked")
 	server.ServeConn(&readWriter{Reader: req.Body, ResponseWriter: w})
 	return
 }
