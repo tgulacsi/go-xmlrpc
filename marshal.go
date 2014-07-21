@@ -146,7 +146,7 @@ func (st *state) parseValue() (nv interface{}, e error) {
 		case "double":
 			nv, e = strconv.ParseFloat(vn.Body, 64)
 		case "dateTime.iso8601":
-			for _, format := range []string{FullXMLRpcTime, LocalXMLRpcTime, DenseXMLRpcTime} {
+			for _, format := range []string{FullXMLRpcTime, LocalXMLRpcTime, DenseXMLRpcTime, DummyXMLRpcTime} {
 				nv, e = time.Parse(format, vn.Body)
 				// log.Print("txt=", vn.Body, " t=", t, " fmt=", format, " e=", e)
 				if e == nil {
