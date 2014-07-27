@@ -18,6 +18,7 @@ import (
 
 var logger = log.New(os.Stderr, "xmlrpc", log.LstdFlags)
 
+/// ISO8601 is not very much restrictive, so many combinations exist
 const (
 	// FullXMLRpcTime is the format of a full XML-RPC time
 	FullXMLRpcTime = "2006-01-02T15:04:05-07:00"
@@ -25,6 +26,8 @@ const (
 	LocalXMLRpcTime = "2006-01-02T15:04:05"
 	// DenseXMLRpcTime is a dense-formatted local time
 	DenseXMLRpcTime = "20060102T15:04:05"
+	// DummyXMLRpcTime is seen in the wild
+	DummyXMLRpcTime = "20060102T15:04:05-0700"
 )
 
 // SetLogger sets a new logger for this package, returns old logger
@@ -143,7 +146,7 @@ func (st *state) parseValue() (nv interface{}, e error) {
 		case "double":
 			nv, e = strconv.ParseFloat(vn.Body, 64)
 		case "dateTime.iso8601":
-			for _, format := range []string{FullXMLRpcTime, LocalXMLRpcTime, DenseXMLRpcTime} {
+			for _, format := range []string{FullXMLRpcTime, LocalXMLRpcTime, DenseXMLRpcTime, DummyXMLRpcTime} {
 				nv, e = time.Parse(format, vn.Body)
 				// log.Print("txt=", vn.Body, " t=", t, " fmt=", format, " e=", e)
 				if e == nil {
