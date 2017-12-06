@@ -220,8 +220,11 @@ func (st *state) parseValue() (nv interface{}, e error) {
 		}
 		nv = values
 		return
+	case "nil":
+		return
 	default:
 		e = fmt.Errorf("cannot parse unknown tag %s", se)
+		return
 	}
 	return
 }
