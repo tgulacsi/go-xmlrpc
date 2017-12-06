@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -197,9 +198,9 @@ func TestClientServer(t *testing.T) {
 	t.Logf("Arith: %d*%d=%+v", args.A, args.B, reply)
 }
 
-func TestSimple(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api" {
+func createServer(path, name string, f func(args ...interface{}) (interface{}, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
@@ -215,12 +216,12 @@ func TestSimple(t *testing.T) {
 			return
 		}
 		var s string
-		if e := p.DecodeElement(&s, &se); e != nil {
+		if err := p.DecodeElement(&s, &se); err != nil {
 			http.Error(w, "wrong function name", http.StatusBadRequest)
 			return
 		}
-		if s != "Add" {
-			http.Error(w, fmt.Sprintf("want function name %q but got %q", "Add", s), http.StatusBadRequest)
+		if s != name {
+			http.Error(w, fmt.Sprintf("want function name %q but got %q", name, s), http.StatusBadRequest)
 			return
 		}
 		se, _ = nextStart(p) // params
@@ -251,46 +252,83 @@ func TestSimple(t *testing.T) {
 			args = append(args, v)
 		}
 
-		if len(args) != 2 {
-			http.Error(w, "bad number of arguments", http.StatusBadRequest)
+		ret, err := f(args...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		io.WriteString(w, `
+		<?xml version="1.0"?>
+		`)
+		if err = Marshal(w, "", ret); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+}
+func TestAddInt(t *testing.T) {
+	ts := httptest.NewServer(createServer("/api", "AddInt", func(args ...interface{}) (interface{}, error) {
+		if len(args) != 2 {
+			return nil, errors.New("bad number of arguments")
 		}
 		switch args[0].(type) {
 		case int:
 		default:
-			http.Error(w, "args[0] should be int", http.StatusBadRequest)
-			return
+			return nil, errors.New("args[0] should be int")
 		}
 		switch args[1].(type) {
 		case int:
 		default:
-			http.Error(w, "args[1] should be int", http.StatusBadRequest)
-			return
+			return nil, errors.New("args[1] should be int")
 		}
-		w.Write([]byte(`
-		<?xml version="1.0"?>
-		<methodResponse>
-		<params>
-			<param>
-				<value><int>` + fmt.Sprint(args[0].(int)+args[1].(int)) + `</int></value>
-			</param>
-		</params>
-		</methodResponse>
-		`))
+		return args[0].(int) + args[1].(int), nil
 	}))
 	defer ts.Close()
 
 	client := NewClient(ts.URL + "/api")
-	v, _, err := client.Call("Add", 1, 2)
+	v, _, err := client.Call("AddInt", 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	i, ok := v.(int)
 	if !ok {
-		t.Fatalf("want int64 but got %T: %v", v, v)
+		t.Fatalf("want int but got %T: %v", v, v)
 	}
 	if i != 3 {
-		t.Fatalf("want 3 but got %v", v)
+		t.Fatalf("want %v but got %v", 3, v)
+	}
+}
+
+func TestAddString(t *testing.T) {
+	ts := httptest.NewServer(createServer("/api", "AddString", func(args ...interface{}) (interface{}, error) {
+		if len(args) != 2 {
+			return nil, errors.New("bad number of arguments")
+		}
+		switch args[0].(type) {
+		case string:
+		default:
+			return nil, errors.New("args[0] should be string")
+		}
+		switch args[1].(type) {
+		case string:
+		default:
+			return nil, errors.New("args[1] should be string")
+		}
+		return args[0].(string) + args[1].(string), nil
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL + "/api")
+	v, _, err := client.Call("AddString", "hello", "world")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, ok := v.(string)
+	if !ok {
+		t.Fatalf("want string but got %T: %v", v, v)
+	}
+	if s != "helloworld" {
+		t.Fatalf("want %q but got %q", "helloworld", v)
 	}
 }
 func next(p *xml.Decoder) (xml.Name, interface{}, error) {
