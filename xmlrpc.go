@@ -675,10 +675,6 @@ func (c *Client) Call(url, name string, args ...interface{}) (interface{}, *Faul
 	return call(c.HttpClient, url, name, args...)
 }
 
-// Global httpClient allows us to pool/reuse connections and not wastefully
-// re-create transports for each request.
-var httpClient = &http.Client{Transport: http.DefaultTransport, Timeout: 10 * time.Second}
-
 func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
-	return call(httpClient, url, name, args...)
+	return call(http.DefaultClient, url, name, args...)
 }
