@@ -326,6 +326,7 @@ func (st *state) checkLast(name string) (e error) {
 // returns the result, a fault pointer, and an error for communication errors
 func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	req := bytes.NewBuffer(nil)
+	req.WriteString(`<?xml version="1.0"?><methodCall>`)
 	e := Marshal(req, name, args...)
 	if e != nil {
 		return nil, nil, e
