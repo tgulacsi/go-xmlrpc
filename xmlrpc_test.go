@@ -2,10 +2,15 @@ package xmlrpc
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"time"
 	// "net/rpc"
 	"reflect"
 	"strings"
@@ -191,3 +196,242 @@ func TestClientServer(t *testing.T) {
 	}
 	t.Logf("Arith: %d*%d=%+v", args.A, args.B, reply)
 }
+
+func TestSimple(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api" {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+		p := xml.NewDecoder(r.Body)
+		se, _ := nextStart(p) // methodResponse
+		if se.Name.Local != "methodCall" {
+			http.Error(w, "missing methodCall", http.StatusBadRequest)
+			return
+		}
+		se, _ = nextStart(p) // params
+		if se.Name.Local != "methodName" {
+			http.Error(w, "missing methodName", http.StatusBadRequest)
+			return
+		}
+		se, _ = nextStart(p) // params
+		if se.Name.Local != "params" {
+			http.Error(w, "missing params", http.StatusBadRequest)
+			return
+		}
+		var args []interface{}
+		for {
+			se, _ = nextStart(p) // param
+			if se.Name.Local == "" {
+				break
+			}
+			if se.Name.Local != "param" {
+				http.Error(w, "missing param", http.StatusBadRequest)
+				return
+			}
+			se, _ = nextStart(p) // value
+			if se.Name.Local != "value" {
+				http.Error(w, "missing value", http.StatusBadRequest)
+				return
+			}
+			_, v, err := next(p)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			args = append(args, v)
+		}
+
+		if len(args) != 2 {
+			http.Error(w, "bad number of arguments", http.StatusBadRequest)
+			return
+		}
+		switch args[0].(type) {
+		case int:
+		default:
+			http.Error(w, "args[0] should be int", http.StatusBadRequest)
+			return
+		}
+		switch args[1].(type) {
+		case int:
+		default:
+			http.Error(w, "args[1] should be int", http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte(`
+		<?xml version="1.0"?>
+		<methodResponse>
+		<params>
+			<param>
+				<value><int>` + fmt.Sprint(args[0].(int)+args[1].(int)) + `</int></value>
+			</param>
+		</params>
+		</methodResponse>
+		`))
+	}))
+	defer ts.Close()
+
+	client := NewClient()
+	v, _, err := client.Call(ts.URL+"/api", "add", 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i, ok := v.(int)
+	if !ok {
+		t.Fatalf("want int64 but got %T: %v", v, v)
+	}
+	if i != 3 {
+		t.Fatalf("want 3 but got %v", v)
+	}
+}
+func next(p *xml.Decoder) (xml.Name, interface{}, error) {
+	se, e := nextStart(p)
+	if e != nil {
+		return xml.Name{}, nil, e
+	}
+
+	var nv interface{}
+	switch se.Name.Local {
+	case "string":
+		var s string
+		if e = p.DecodeElement(&s, &se); e != nil {
+			return xml.Name{}, nil, e
+		}
+		return xml.Name{}, s, nil
+	case "boolean":
+		var s string
+		if e = p.DecodeElement(&s, &se); e != nil {
+			return xml.Name{}, nil, e
+		}
+		s = strings.TrimSpace(s)
+		var b bool
+		switch s {
+		case "true", "1":
+			b = true
+		case "false", "0":
+			b = false
+		default:
+			e = errors.New("invalid boolean value")
+		}
+		return xml.Name{}, b, e
+	case "int", "i1", "i2", "i4", "i8":
+		var s string
+		var i int
+		if e = p.DecodeElement(&s, &se); e != nil {
+			return xml.Name{}, nil, e
+		}
+		i, e = strconv.Atoi(strings.TrimSpace(s))
+		return xml.Name{}, i, e
+	case "double":
+		var s string
+		var f float64
+		if e = p.DecodeElement(&s, &se); e != nil {
+			return xml.Name{}, nil, e
+		}
+		f, e = strconv.ParseFloat(strings.TrimSpace(s), 64)
+		return xml.Name{}, f, e
+	case "dateTime.iso8601":
+		var s string
+		if e = p.DecodeElement(&s, &se); e != nil {
+			return xml.Name{}, nil, e
+		}
+		t, e := time.Parse("20060102T15:04:05", s)
+		if e != nil {
+			t, e = time.Parse("2006-01-02T15:04:05-07:00", s)
+			if e != nil {
+				t, e = time.Parse("2006-01-02T15:04:05", s)
+			}
+		}
+		return xml.Name{}, t, e
+	case "base64":
+		var s string
+		if e = p.DecodeElement(&s, &se); e != nil {
+			return xml.Name{}, nil, e
+		}
+		if b, e := base64.StdEncoding.DecodeString(s); e != nil {
+			return xml.Name{}, nil, e
+		} else {
+			return xml.Name{}, b, nil
+		}
+	case "member":
+		nextStart(p)
+		return next(p)
+	case "value":
+		nextStart(p)
+		return next(p)
+	case "name":
+		nextStart(p)
+		return next(p)
+	case "struct":
+		st := Struct{}
+
+		se, e = nextStart(p)
+		for e == nil && se.Name.Local == "member" {
+			// name
+			se, e = nextStart(p)
+			if se.Name.Local != "name" {
+				return xml.Name{}, nil, errors.New("invalid response")
+			}
+			if e != nil {
+				break
+			}
+			var name string
+			if e = p.DecodeElement(&name, &se); e != nil {
+				return xml.Name{}, nil, e
+			}
+			se, e = nextStart(p)
+			if e != nil {
+				break
+			}
+
+			// value
+			_, value, e := next(p)
+			if se.Name.Local != "value" {
+				return xml.Name{}, nil, errors.New("invalid response")
+			}
+			if e != nil {
+				break
+			}
+			st[name] = value
+
+			se, e = nextStart(p)
+			if e != nil {
+				break
+			}
+		}
+		return xml.Name{}, st, nil
+	case "array":
+		var ar Array
+		nextStart(p) // data
+		for {
+			nextStart(p) // top of value
+			_, value, e := next(p)
+			if e != nil {
+				break
+			}
+			ar = append(ar, value)
+		}
+		return xml.Name{}, ar, nil
+	}
+
+	if e = p.DecodeElement(nv, &se); e != nil {
+		return xml.Name{}, nil, e
+	}
+	return se.Name, nv, e
+}
+func nextStart(p *xml.Decoder) (xml.StartElement, error) {
+	for {
+		t, e := p.Token()
+		if e != nil {
+			return xml.StartElement{}, e
+		}
+		switch t := t.(type) {
+		case xml.StartElement:
+			return t, nil
+		}
+	}
+	panic("unreachable")
+}
+
+type Array []interface{}
+type Struct map[string]interface{}
