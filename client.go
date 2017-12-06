@@ -78,23 +78,23 @@ func (c *clientCodec) Close() error {
 	return c.conn.Close()
 }
 
-// NewClient returns a new Client to handle requests to the
+// NewRPCClient returns a new rpc.Client to handle requests to the
 // set of services at the other end of the connection.
 // It adds a buffer to the write side of the connection so
 // the header and payload are sent as a unit.
-func NewClient(conn io.ReadWriteCloser) *rpc.Client {
+func NewRPCClient(conn io.ReadWriteCloser) *rpc.Client {
 	return rpc.NewClientWithCodec(NewClientCodec(conn))
 }
 
-// DialHTTP connects to an HTTP RPC server at the specified network address
+// RPCDialHTTP connects to an HTTP RPC server at the specified network address
 // listening on the default HTTP RPC path.
-func DialHTTP(network, address string) (*rpc.Client, error) {
-	return DialHTTPPath(network, address, DefaultXMLRPCPath)
+func RPCDialHTTP(network, address string) (*rpc.Client, error) {
+	return RPCDialHTTPPath(network, address, DefaultXMLRPCPath)
 }
 
-// DialHTTPPath connects to an HTTP RPC server
+// RPCDialHTTPPath connects to an HTTP RPC server
 // at the specified network address and path.
-func DialHTTPPath(network, address, path string) (*rpc.Client, error) {
+func RPCDialHTTPPath(network, address, path string) (*rpc.Client, error) {
 	var err error
 	conn, err := net.Dial(network, address)
 	if err != nil {
@@ -106,7 +106,7 @@ func DialHTTPPath(network, address, path string) (*rpc.Client, error) {
 	// before switching to RPC protocol.
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
 	if err == nil && strings.HasPrefix(resp.Status, "200 ") {
-		return NewClient(conn), nil
+		return NewRPCClient(conn), nil
 	}
 	if err == nil {
 		err = errors.New("unexpected HTTP response: " + resp.Status)
@@ -121,10 +121,10 @@ func DialHTTPPath(network, address, path string) (*rpc.Client, error) {
 }
 
 // Dial connects to an RPC server at the specified network address.
-func Dial(network, address string) (*rpc.Client, error) {
+func RPCDial(network, address string) (*rpc.Client, error) {
 	conn, err := net.Dial(network, address)
 	if err != nil {
 		return nil, err
 	}
-	return NewClient(conn), nil
+	return NewRPCClient(conn), nil
 }

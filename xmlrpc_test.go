@@ -176,7 +176,7 @@ func TestClientServer(t *testing.T) {
 	}
 	go http.Serve(l, nil)
 
-	client, err := DialHTTP("tcp", "localhost:1234")
+	client, err := RPCDialHTTP("tcp", "localhost:1234")
 	if err != nil {
 		t.Fatal("dialing:", err)
 	}

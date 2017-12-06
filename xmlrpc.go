@@ -322,9 +322,9 @@ func (st *state) checkLast(name string) (e error) {
 	return
 }
 
-// Call callse the method with "name" at the url location, with the given args
+// call callse the method with "name" at the url location, with the given args
 // returns the result, a fault pointer, and an error for communication errors
-func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
+func call(client *http.Client, url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	req := bytes.NewBuffer(nil)
 	req.WriteString(`<?xml version="1.0"?><methodCall>`)
 	e := Marshal(req, name, args...)
@@ -565,6 +565,16 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 	return err
 }
 
+type Client struct {
+	HttpClient *http.Client
+}
+
+func NewClient() *Client {
+	return &Client{
+		HttpClient: &http.Client{Transport: http.DefaultTransport, Timeout: 10 * time.Second},
+	}
+}
+
 func getFault(v interface{}) (*Fault, bool) {
 	// log.Printf("getFault(%+v %T)", v, v)
 	if f, ok := v.(Fault); ok {
@@ -659,4 +669,16 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 		e = st.checkLast(typ)
 	}
 	return
+}
+
+func (c *Client) Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
+	return call(c.HttpClient, url, name, args...)
+}
+
+// Global httpClient allows us to pool/reuse connections and not wastefully
+// re-create transports for each request.
+var httpClient = &http.Client{Transport: http.DefaultTransport, Timeout: 10 * time.Second}
+
+func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
+	return call(httpClient, url, name, args...)
 }

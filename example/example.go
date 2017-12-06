@@ -106,7 +106,7 @@ func main() {
 		}
 	}
 	log.Printf("creating client for %s/%s", url, DefaultXMLRpcPath)
-	client, err := xmlrpc.DialHTTPPath("tcp", url, DefaultXMLRpcPath)
+	client, err := xmlrpc.RPCDialHTTPPath("tcp", url, DefaultXMLRpcPath)
 	if err != nil {
 		log.Fatal(err)
 	}
