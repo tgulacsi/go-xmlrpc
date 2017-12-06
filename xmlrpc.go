@@ -565,10 +565,12 @@ func Marshal(w io.Writer, name string, args ...interface{}) (err error) {
 	return err
 }
 
+// Client is client of XMLRPC
 type Client struct {
 	HttpClient *http.Client
 }
 
+// NewClient create new Client
 func NewClient() *Client {
 	return &Client{
 		HttpClient: &http.Client{Transport: http.DefaultTransport, Timeout: 10 * time.Second},
@@ -671,10 +673,16 @@ func Unmarshal(r io.Reader) (name string, params []interface{}, fault *Fault, e 
 	return
 }
 
+// Call call remote procedures function name with args
 func (c *Client) Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
 	return call(c.HttpClient, url, name, args...)
 }
 
+// Global httpClient allows us to pool/reuse connections and not wastefully
+// re-create transports for each request.
+var httpClient = &http.Client{Transport: http.DefaultTransport, Timeout: 10 * time.Second}
+
+// Call call remote procedures function name with args
 func Call(url, name string, args ...interface{}) (interface{}, *Fault, error) {
-	return call(http.DefaultClient, url, name, args...)
+	return call(httpClient, url, name, args...)
 }
