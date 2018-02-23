@@ -80,7 +80,7 @@ func TestUnmarshalResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal("error unmarshaling xmlResponse:", err)
 	}
-	t.Logf("unmarshalled response[%s]: %+v\n%s\n", name, c, fault)
+	t.Logf("unmarshalled response[%s]: %+v\n%v\n", name, c, fault)
 }
 
 func TestMarshalling(t *testing.T) {
@@ -102,7 +102,7 @@ func TestMarshalling(t *testing.T) {
 	// double check, because sometimes I got back array in array
 	if !(fmt.Sprintf("%#v", xmlCallStruct) == cS ||
 		fmt.Sprintf("%#v", []interface{}{xmlCallStruct}) == cS) {
-		t.Errorf("struct mismatch:\n%s\n!=\n%#v\n&&\n%s\n!=\n%#v\n%s ? %s\n",
+		t.Errorf("struct mismatch:\n%s\n!=\n%#v\n&&\n%s\n!=\n%#v\n%v ? %v\n",
 			cS, xmlCallStruct, cS, []interface{}{xmlCallStruct},
 			reflect.DeepEqual(c, xmlCallStruct),
 			reflect.DeepEqual(c, []interface{}{xmlCallStruct}))

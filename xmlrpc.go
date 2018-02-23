@@ -39,7 +39,6 @@ func SetLogger(lgr *log.Logger) *log.Logger {
 
 // Unsupported is the error of "Unsupported type"
 var Unsupported = errors.New("Unsupported type")
-var levelDecremented = errors.New("level decremented")
 
 // Fault is the struct for the fault response
 type Fault struct {
@@ -319,83 +318,6 @@ func (st *state) getText(name string) (text string, e error) {
 func (st *state) checkLast(name string) (e error) {
 	_, _, e = st.token(tokStop, name)
 	// log.Printf("  l")
-	return
-}
-
-func toXML(v interface{}, typ bool) (s string) {
-	r := reflect.ValueOf(v)
-	t := r.Type()
-	k := t.Kind()
-
-	if b, ok := v.([]byte); ok {
-		return "<base64>" + base64.StdEncoding.EncodeToString(b) + "</base64>"
-	}
-
-	switch k {
-	case reflect.Invalid:
-		panic("Unsupported type")
-	case reflect.Bool:
-		return fmt.Sprintf("<boolean>%v</boolean>", v)
-	case reflect.Int,
-		reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint,
-		reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if typ {
-			return fmt.Sprintf("<int>%v</int>", v)
-		}
-		return fmt.Sprintf("%v", v)
-	case reflect.Uintptr:
-		panic("Unsupported type")
-	case reflect.Float32, reflect.Float64:
-		if typ {
-			return fmt.Sprintf("<double>%v</double>", v)
-		}
-		return fmt.Sprintf("%v", v)
-	case reflect.Complex64, reflect.Complex128:
-		panic("Unsupported type")
-	case reflect.Array, reflect.Slice:
-		s = "<array><data>"
-		for n := 0; n < r.Len(); n++ {
-			s += "<value>"
-			s += toXML(r.Index(n).Interface(), typ)
-			s += "</value>"
-		}
-		s += "</data></array>"
-		return s
-	case reflect.Chan:
-		panic("Unsupported type")
-	case reflect.Func:
-		panic("Unsupported type")
-	case reflect.Interface:
-		return toXML(r.Elem(), typ)
-	case reflect.Map:
-		s = "<struct>"
-		for _, key := range r.MapKeys() {
-			s += "<member>"
-			s += "<name>" + xmlEscape(key.Interface().(string)) + "</name>"
-			s += "<value>" + toXML(r.MapIndex(key).Interface(), typ) + "</value>"
-			s += "</member>"
-		}
-		return s + "</struct>"
-	case reflect.Ptr:
-		panic("Unsupported type")
-	case reflect.String:
-		if typ {
-			return fmt.Sprintf("<string>%v</string>", xmlEscape(v.(string)))
-		}
-		return xmlEscape(v.(string))
-	case reflect.Struct:
-		s = "<struct>"
-		for n := 0; n < r.NumField(); n++ {
-			s += "<member>"
-			s += "<name>" + t.Field(n).Name + "</name>"
-			s += "<value>" + toXML(r.FieldByIndex([]int{n}).Interface(), true) + "</value>"
-			s += "</member>"
-		}
-		return s + "</struct>"
-	case reflect.UnsafePointer:
-		return toXML(r.Elem(), typ)
-	}
 	return
 }
 

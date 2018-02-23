@@ -55,10 +55,7 @@ func (c *serverCodec) WriteResponse(req *rpc.Response, param interface{}) error 
 func (c *serverCodec) ReadRequestHeader(r *rpc.Request) (err error) {
 	r.ServiceMethod, c.params, c.fault, err = Unmarshal(c.conn)
 	log.Printf("RRH %s %+v %s", r.ServiceMethod, c.params, err)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (c *serverCodec) ReadRequestBody(dst interface{}) (err error) {
@@ -157,7 +154,6 @@ func (server *XMLRpcServer) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	defer req.Body.Close()
 	w.Header().Set("Content-Type", "text/xml")
 	server.ServeConn(&readWriter{Reader: req.Body, ResponseWriter: w})
-	return
 }
 
 // DefaultServer is the default server
